@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2025 Rhys Sullivan (https://github.com/RhysSullivan/twitter-account-location-in-username for original work)
+
 Copyright (c) 2025 travofoz (https://github.com/travofoz/twitter-account-location-in-username for enhancements work)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
