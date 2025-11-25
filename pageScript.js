@@ -119,20 +119,22 @@
         
         let location = null;
         let locationAccurate = null;
+        let fullResult = null;
         if (response.ok) {
           const data = await response.json();
           console.log(`API response for ${screenName}:`, data);
-          const about = data?.data?.user_result_by_screen_name?.result?.about_profile;
+          fullResult = data?.data?.user_result_by_screen_name?.result || null;
+          const about = fullResult?.about_profile;
           location = about?.account_based_in || null;
           // location_accurate is expected to be a boolean (true/false) in the API response
           locationAccurate = about?.location_accurate;
           console.log(`Extracted location for ${screenName}:`, location, 'accurate:', locationAccurate);
 
           // Debug: log the full path to see what's available
-          if (!location && data?.data?.user_result_by_screen_name?.result) {
+          if (!location && fullResult) {
             console.log('User result available but no location:', {
-              hasAboutProfile: !!data.data.user_result_by_screen_name.result.about_profile,
-              aboutProfile: data.data.user_result_by_screen_name.result.about_profile
+              hasAboutProfile: !!fullResult.about_profile,
+              aboutProfile: fullResult.about_profile
             });
           }
         } else {
@@ -169,11 +171,13 @@
         // Include error status so content script knows not to cache on rate limit
         // Include `locationAccurate` (may be true/false/undefined) so the content script can
         // render an indicator and cache the boolean alongside the location string.
+        // Include the full `result` object when available so content script can render a rich tooltip
         window.postMessage({
           type: '__locationResponse',
           screenName,
           location,
           locationAccurate,
+          fullResult,
           requestId,
           isRateLimited: response.status === 429
         }, '*');

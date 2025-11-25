@@ -22,7 +22,7 @@
         "https://x.com/*",
         "https://twitter.com/*"
       ],
-      "js": ["countryFlags.js", "content.js"],
+      "js": ["countryFlags.js", "cache.js", "api.js", "tooltip.js", "ui.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
