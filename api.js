@@ -1,13 +1,37 @@
-// API request queue and rate limiting
+/**
+ * @fileoverview API request queue and rate limiting for Twitter profile location fetching
+ * @module api
+ */
+
+/** @type {Array<{screenName: string, resolve: Function, reject: Function}>} */
 const requestQueue = [];
+/** @type {boolean} */
 let isProcessingQueue = false;
+/** @type {number} */
 let lastRequestTime = 0;
+
+/** @constant {number} Minimum interval between API requests in milliseconds */
 const MIN_REQUEST_INTERVAL = 2000;
+/** @constant {number} Maximum number of concurrent API requests */
 const MAX_CONCURRENT_REQUESTS = 2;
+/** @constant {number} Request timeout in milliseconds */
+const REQUEST_TIMEOUT = 10000;
+/** @constant {number} Queue processing delay in milliseconds */
+const QUEUE_PROCESS_DELAY = 200;
+/** @constant {number} Maximum wait time for rate limit in milliseconds */
+const MAX_RATE_LIMIT_WAIT = 60000;
+/** @type {number} */
 let activeRequests = 0;
+/** @type {number} */
 let rateLimitResetTime = 0;
 
-// Structured error logging
+/**
+ * Logs structured error messages with timestamp and context
+ * @param {string} context - The context where the error occurred
+ * @param {Error|string} error - The error object or message
+ * @param {'error'|'warn'|'info'} [severity='error'] - The severity level of the log
+ * @returns {void}
+ */
 function logError(context, error, severity = 'error') {
   const timestamp = new Date().toISOString();
   const errorMsg = error instanceof Error ? error.message : String(error);
@@ -18,6 +42,10 @@ function logError(context, error, severity = 'error') {
   });
 }
 
+/**
+ * Processes the API request queue with rate limiting and concurrency control
+ * @returns {Promise<void>}
+ */
 async function processRequestQueue() {
   if (isProcessingQueue || requestQueue.length === 0) return;
   
@@ -26,7 +54,7 @@ async function processRequestQueue() {
     if (now < rateLimitResetTime) {
       const waitTime = (rateLimitResetTime - now) * 1000;
       console.log(`Rate limited. Waiting ${Math.ceil(waitTime / 1000 / 60)} minutes...`);
-      setTimeout(processRequestQueue, Math.min(waitTime, 60000));
+      setTimeout(processRequestQueue, Math.min(waitTime, MAX_RATE_LIMIT_WAIT));
       return;
     }
     rateLimitResetTime = 0;
@@ -65,13 +93,18 @@ async function processRequestQueue() {
       })
       .finally(() => {
         activeRequests--;
-        setTimeout(processRequestQueue, 200);
+        setTimeout(processRequestQueue, QUEUE_PROCESS_DELAY);
       });
   }
   
   isProcessingQueue = false;
 }
 
+/**
+ * Makes a location request for a Twitter username via postMessage communication
+ * @param {string} screenName - The Twitter username to fetch location for
+ * @returns {Promise<{location: string|null, locationAccurate: boolean|null, fullResult: Object|null}>}
+ */
 function makeLocationRequest(screenName) {
   return new Promise((resolve) => {
     const requestId = Date.now() + Math.random();
@@ -120,16 +153,35 @@ function makeLocationRequest(screenName) {
       window.removeEventListener('message', handler);
       console.log(`Request timeout for ${screenName}`);
       resolve(null);
-    }, 10000);
+    }, REQUEST_TIMEOUT);
   });
 }
 
+/** @type {boolean} */
 let rateLimitInfoHandlerRegistered = false;
+/** @type {boolean} */
+let pageScriptInjected = false;
 
+/**
+ * Injects the page script for making API calls and sets up rate limit monitoring
+ */
 function injectPageScript() {
+  // Prevent multiple script injections
+  if (pageScriptInjected) {
+    console.log('Page script already injected, skipping');
+    return;
+  }
+  
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('pageScript.js');
-  script.onload = () => script.remove();
+  script.onload = () => {
+    script.remove();
+    pageScriptInjected = true;
+    console.log('Page script injected successfully');
+  };
+  script.onerror = () => {
+    console.error('Failed to inject page script');
+  };
   (document.head || document.documentElement).appendChild(script);
   
   // Register rate limit listener only once to prevent accumulation
@@ -147,6 +199,13 @@ function injectPageScript() {
   }
 }
 
+/**
+ * Gets user location data, checking cache first then queuing API request if needed
+ * @param {string} screenName - The Twitter username to fetch location for
+ * @param {Object} [options={}] - Options for the request
+ * @param {boolean} [options.force=false] - Force refresh even if cached data exists
+ * @returns {Promise<{location: string|null, locationAccurate: boolean|null, fullResult: Object|null}>}
+ */
 function getUserLocation(screenName, options = {}) {
   const force = !!options.force;
   

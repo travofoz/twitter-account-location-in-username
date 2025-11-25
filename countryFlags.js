@@ -1,4 +1,9 @@
-// Country name to flag emoji mapping
+/**
+ * @fileoverview Country name to flag emoji mapping and lookup functions
+ * @module countryFlags
+ */
+
+/** @type {Object<string, string>} Mapping of country names to flag emojis */
 const COUNTRY_FLAGS = {
   // A
   "Afghanistan": "🇦🇫",
@@ -228,22 +233,42 @@ const COUNTRY_FLAGS = {
   "Zimbabwe": "🇿🇼"
 };
 
+/**
+ * Gets the flag emoji for a given country name
+ * @param {string} countryName - The name of the country to get flag for
+ * @returns {string|null} The flag emoji or null if not found
+ */
 function getCountryFlag(countryName) {
   if (!countryName) return null;
   
   // Try exact match first
   if (COUNTRY_FLAGS[countryName]) {
-    return COUNTRY_FLAGS[countryName];
+    return {
+      emoji: COUNTRY_FLAGS[countryName],
+      country: countryName,
+      label: countryName
+    };
   }
   
   // Try case-insensitive match
   const normalized = countryName.trim();
   for (const [country, flag] of Object.entries(COUNTRY_FLAGS)) {
     if (country.toLowerCase() === normalized.toLowerCase()) {
-      return flag;
+      return {
+        emoji: flag,
+        country: country,
+        label: country
+      };
     }
   }
   
   return null;
+}
+
+// Expose functions on window
+try {
+  window.getCountryFlag = getCountryFlag;
+} catch (e) {
+  // Silently ignore if window is unavailable
 }
 

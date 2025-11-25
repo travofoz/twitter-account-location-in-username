@@ -1,15 +1,33 @@
-// Bootstrap and observer - orchestrates all modules
-// Modules loaded via script tags in manifest.json:
-// cache.js, api.js, countryFlags.js, tooltip.js, ui.js
+/**
+ * @fileoverview Bootstrap and observer - orchestrates all extension modules
+ * @module content
+ * 
+ * Modules loaded via script tags in manifest.json:
+ * cache.js, api.js, countryFlags.js, tooltip.js, ui.js
+ */
 
+/** @type {MutationObserver|null} */
 let observer = null;
+/** @type {boolean} */
 let extensionEnabled = true;
+
+/** @constant {string} Storage key for extension toggle state */
 const TOGGLE_KEY = 'extension_enabled';
+/** @constant {boolean} Default enabled state */
 const DEFAULT_ENABLED = true;
+/** @constant {number} Debounce delay for username processing in milliseconds */
+const USERNAME_PROCESS_DEBOUNCE = 300;
+/** @constant {number} Extension toggle delay in milliseconds */
+const TOGGLE_DELAY = 500;
+/** @constant {number} Metrics logging interval */
+const METRICS_LOG_INTERVAL = 100;
+
+/** @type {Set<string>} Set of usernames currently being processed */
 const processingUsernames = new Set();
+/** @type {number|null} Timeout ID for debounced username processing */
 let processUsernamesTimeout = null;
 
-// Performance metrics
+/** @type {Object} Performance metrics tracking */
 const metrics = {
   totalProcessed: 0,
   totalFlags: 0,
@@ -18,12 +36,19 @@ const metrics = {
   startTime: Date.now()
 };
 
+/**
+ * Logs current performance metrics to console
+ * @returns {void}
+ */
 function logMetrics() {
   const uptime = ((Date.now() - metrics.startTime) / 1000 / 60).toFixed(1);
   console.log(`[Metrics] Uptime: ${uptime}m | Processed: ${metrics.totalProcessed} | Flags: ${metrics.totalFlags} | Cache Hits: ${metrics.cacheHits} | API Requests: ${metrics.apiRequests}`);
 }
 
-// Load enabled state
+/**
+ * Loads the extension enabled state from Chrome storage
+ * @returns {Promise<void>}
+ */
 async function loadEnabledState() {
   try {
     const result = await chrome.storage.local.get([TOGGLE_KEY]);
@@ -44,7 +69,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (extensionEnabled) {
       setTimeout(() => {
         processUsernames();
-      }, 500);
+      }, TOGGLE_DELAY);
     } else {
       removeAllFlags();
       // Disconnect observer when extension is disabled
@@ -66,7 +91,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Helper: check if we should display cached UI instead of globe
+/**
+ * Checks if cached profile data exists for a screen name
+ * @param {string} screenName - The Twitter username to check
+ * @returns {boolean} True if cached data exists
+ */
 function hasCachedProfileData(screenName) {
   // Use the shared caches exposed by cache.js on the window object
   try {
@@ -83,7 +112,11 @@ function hasCachedProfileData(screenName) {
   return false;
 }
 
-// Function to extract username from various Twitter UI elements
+/**
+ * Extracts Twitter username from various UI elements
+ * @param {Element} element - The DOM element to extract username from
+ * @returns {string|null} The extracted username or null if not found
+ */
 function extractUsername(element) {
   // Cache querySelector calls at function level to avoid redundant DOM traversal
   const usernameElement = element.querySelector('[data-testid="UserName"], [data-testid="User-Name"]');
@@ -187,7 +220,9 @@ function extractUsername(element) {
   return null;
 }
 
-// Function to remove all flags (when extension is disabled)
+/**
+ * Removes all flag elements and cleans up extension UI when disabled
+ */
 function removeAllFlags() {
   // Remove flag elements
   const flags = document.querySelectorAll('[data-twitter-location-flag], [data-twitter-location-globe]');
@@ -210,21 +245,38 @@ function removeAllFlags() {
     delete container.dataset.flagAdded;
   });
   
+  // Reset username processed markers
+  const processedContainers = document.querySelectorAll('[data-username-processed]');
+  processedContainers.forEach(container => {
+    delete container.dataset.usernameProcessed;
+  });
+  
   // Clear processingUsernames Set to prevent memory leak
   processingUsernames.clear();
   
-  console.log('Removed all flags and cleared processing state');
+  // Clean up click debounce entries
+  try {
+    const cleanupDebounces = (typeof window !== 'undefined' && window.cleanupAllClickDebounces) ? window.cleanupAllClickDebounces : (typeof cleanupAllClickDebounces === 'function' ? cleanupAllClickDebounces : null);
+    if (cleanupDebounces) cleanupDebounces();
+  } catch (e) {
+    console.error('Error cleaning up click debounces:', e);
+  }
+  
+  console.log('Removed all flags, shimmers, and cleared processing state');
 }
 
-// Function to process all username elements on the page
+/**
+ * Processes all username elements on the page to add location flags
+ * @returns {Promise<void>}
+ */
 async function processUsernames() {
   // Check if extension is enabled
   if (!extensionEnabled) {
     return;
   }
   
-  // Find all tweet/article containers and user cells
-  const containers = document.querySelectorAll('article[data-testid="tweet"], [data-testid="UserCell"], [data-testid="User-Names"], [data-testid="User-Name"]');
+  // Find all tweet/article containers and user cells (but not individual User-Name elements to avoid duplicates)
+  const containers = document.querySelectorAll('article[data-testid="tweet"], [data-testid="UserCell"]');
   
   console.log(`Processing ${containers.length} containers for usernames`);
   
@@ -241,19 +293,21 @@ async function processUsernames() {
         processedCount++;
         // Process in parallel but limit concurrency
         // Call addFlagToUsername via window if available; fallback to global
+        // NOTE: This should ONLY handle UI display (cached data or globe), NO auto-fetching
         try {
           const flagAdder = (typeof window !== 'undefined' && window.addFlagToUsername) ? window.addFlagToUsername : (typeof addFlagToUsername === 'function' ? addFlagToUsername : null);
           if (flagAdder) {
+            console.log(`[UI] Adding UI element for ${screenName} (click-to-fetch mode)`);
             flagAdder(container, screenName).catch(err => {
-              console.error(`Error processing ${screenName}:`, err);
+              console.error(`[UI] Error adding UI for ${screenName}:`, err);
               container.dataset.flagAdded = 'failed';
             });
           } else {
-            console.error(`addFlagToUsername not available for ${screenName}`);
+            console.error(`[UI] addFlagToUsername not available for ${screenName}`);
             container.dataset.flagAdded = 'failed';
           }
         } catch (e) {
-          console.error(`Error processing ${screenName}:`, e);
+          console.error(`[UI] Error adding UI for ${screenName}:`, e);
           container.dataset.flagAdded = 'failed';
         }
       } else {
@@ -279,12 +333,15 @@ async function processUsernames() {
   processingUsernames.clear();
   
   // Log metrics every 100 processed items
-  if (metrics.totalProcessed % 100 === 0 && metrics.totalProcessed > 0) {
+  if (metrics.totalProcessed % METRICS_LOG_INTERVAL === 0 && metrics.totalProcessed > 0) {
     logMetrics();
   }
 }
 
-// Setup observer for dynamically loaded content
+/**
+ * Sets up MutationObserver to handle dynamically loaded content
+ * @returns {void}
+ */
 function setupObserver() {
   if (observer) observer.disconnect();
 
@@ -294,7 +351,7 @@ function setupObserver() {
       clearTimeout(processUsernamesTimeout);
     }
     // Increase debounce from 100ms to 300ms to reduce excessive DOM queries
-    processUsernamesTimeout = setTimeout(processUsernames, 300);
+    processUsernamesTimeout = setTimeout(processUsernames, USERNAME_PROCESS_DEBOUNCE);
   });
 
   observer.observe(document.body, {
@@ -303,7 +360,10 @@ function setupObserver() {
   });
 }
 
-// Initialize extension
+/**
+ * Initializes the extension by loading state, cache, and setting up observers
+ * @returns {Promise<void>}
+ */
 async function init() {
   try {
     console.log('Initializing extension...');
@@ -345,7 +405,10 @@ if (document.readyState === 'loading') {
   init();
 }
 
-// Comprehensive cleanup on page unload
+/**
+ * Cleans up all extension resources on page unload
+ * @returns {void}
+ */
 function cleanupAllResources() {
   console.log('Cleaning up all resources...');
   

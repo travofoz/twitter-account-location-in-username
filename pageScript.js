@@ -1,10 +1,24 @@
-// This script runs in the page context to access cookies and make API calls
+/**
+ * @fileoverview Page script that runs in page context to access cookies and make API calls
+ * @module pageScript
+ */
 (function() {
-  // Store headers from Twitter's own API calls
+  /** @type {Object|null} Headers captured from Twitter's API calls */
   let twitterHeaders = null;
+  /** @type {boolean} Flag indicating if headers are ready for use */
   let headersReady = false;
+
+  /** @constant {number} Headers capture timeout in milliseconds */
+  const HEADERS_CAPTURE_TIMEOUT = 3000;
+  /** @constant {number} Headers wait check interval in milliseconds */
+  const HEADERS_WAIT_INTERVAL = 100;
+  /** @constant {number} Maximum number of header wait attempts */
+  const MAX_HEADER_WAIT_ATTEMPTS = 30;
   
-  // Function to capture headers from a request
+  /**
+   * Captures and stores headers from Twitter API requests
+   * @param {Headers|Object} headers - Headers object to capture
+   */
   function captureHeaders(headers) {
     if (!headers) return;
     
@@ -81,7 +95,7 @@
       };
       headersReady = true;
     }
-  }, 3000);
+  }, HEADERS_CAPTURE_TIMEOUT);
   
   // Listen for fetch requests from content script via postMessage
   window.addEventListener('message', async function(event) {
@@ -92,8 +106,8 @@
       // Wait for headers to be ready
       if (!headersReady) {
         let waitCount = 0;
-        while (!headersReady && waitCount < 30) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        while (!headersReady && waitCount < MAX_HEADER_WAIT_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(resolve, HEADERS_WAIT_INTERVAL));
           waitCount++;
         }
       }

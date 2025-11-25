@@ -1,8 +1,39 @@
-// Tooltip rendering and interactions
+/**
+ * @fileoverview Tooltip rendering and interactions for profile information
+ * @module tooltip
+ */
+
+/** @type {Element|null} Currently displayed tooltip element */
 let currentTooltip = null;
+/** @type {Object<string, boolean>} Track which profiles are being refreshed */
 let refreshInProgress = {};
+/** @type {AbortController|null} AbortController for tooltip event cleanup */
 let tooltipAbortController = null;
 
+/** @constant {number} Tooltip minimum width in pixels */
+const TOOLTIP_MIN_WIDTH = 280;
+/** @constant {number} Tooltip maximum width in pixels */
+const TOOLTIP_MAX_WIDTH = 380;
+/** @constant {number} Tooltip padding in pixels */
+const TOOLTIP_PADDING = 14;
+/** @constant {number} Tooltip border radius in pixels */
+const TOOLTIP_BORDER_RADIUS = 10;
+/** @constant {number} Tooltip offset from anchor in pixels */
+const TOOLTIP_OFFSET = 8;
+/** @constant {number} Tooltip minimum distance from viewport edge in pixels */
+const TOOLTIP_VIEWPORT_MARGIN = 20;
+/** @constant {number} Avatar size in pixels */
+const AVATAR_SIZE = 72;
+/** @constant {number} Grid gap in pixels */
+const GRID_GAP = 10;
+/** @constant {number} Grid column gap in pixels */
+const GRID_COLUMN_GAP = 12;
+
+/**
+ * Formats a timestamp to a localized date string
+ * @param {number|string} ts - Timestamp to format
+ * @returns {string|null} Formatted date string or null if invalid
+ */
 function formatTimestampToDate(ts) {
   if (!ts) return null;
   const n = Number(ts);
@@ -11,6 +42,11 @@ function formatTimestampToDate(ts) {
   return d.toLocaleString();
 }
 
+/**
+ * Refreshes profile data for a given screen name and updates tooltip
+ * @param {string} screenName - The Twitter username to refresh
+ * @returns {Promise<void>}
+ */
 async function refreshProfile(screenName) {
   if (refreshInProgress[screenName]) return;
   refreshInProgress[screenName] = true;
@@ -33,6 +69,11 @@ async function refreshProfile(screenName) {
   }
 }
 
+/**
+ * Creates a profile tooltip element with user information
+ * @param {Object} profile - The profile object to display
+ * @returns {HTMLDivElement} The created tooltip element
+ */
 function createProfileTooltip(profile) {
   // Input validation
   if (!profile || typeof profile !== 'object') {
@@ -44,12 +85,12 @@ function createProfileTooltip(profile) {
   container.setAttribute('data-twitter-profile-tooltip', 'true');
   container.style.position = 'absolute';
   container.style.zIndex = 999999;
-  container.style.minWidth = '280px';
-  container.style.maxWidth = '380px';
+  container.style.minWidth = `${TOOLTIP_MIN_WIDTH}px`;
+  container.style.maxWidth = `${TOOLTIP_MAX_WIDTH}px`;
   container.style.background = '#1a1a1a';
   container.style.color = '#e7e7e7';
-  container.style.padding = '14px';
-  container.style.borderRadius = '10px';
+  container.style.padding = `${TOOLTIP_PADDING}px`;
+  container.style.borderRadius = `${TOOLTIP_BORDER_RADIUS}px`;
   container.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)';
   container.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
   container.style.fontSize = '13px';
@@ -81,8 +122,8 @@ function createProfileTooltip(profile) {
   const avatar = document.createElement('img');
   avatar.src = profile?.avatar?.image_url || '';
   avatar.alt = profile?.core?.screen_name || '';
-  avatar.style.width = '72px';
-  avatar.style.height = '72px';
+  avatar.style.width = `${AVATAR_SIZE}px`;
+  avatar.style.height = `${AVATAR_SIZE}px`;
   avatar.style.borderRadius = profile?.profile_image_shape === 'Circle' ? '50%' : '8px';
   avatar.style.objectFit = 'cover';
   avatar.style.display = 'block';
@@ -160,7 +201,7 @@ function createProfileTooltip(profile) {
   grid.style.marginTop = '0';
   grid.style.display = 'grid';
   grid.style.gridTemplateColumns = '1fr 1fr';
-  grid.style.gap = '10px 12px';
+  grid.style.gap = `${GRID_GAP}px ${GRID_COLUMN_GAP}px`;
   grid.style.marginBottom = '10px';
   grid.style.paddingBottom = '10px';
   grid.style.borderBottom = '1px solid #333';
@@ -243,6 +284,12 @@ function createProfileTooltip(profile) {
   return container;
 }
 
+/**
+ * Shows a profile tooltip positioned relative to an anchor element
+ * @param {Element} anchorEl - The element to position tooltip relative to
+ * @param {Object} profile - The profile object to display in tooltip
+ * @returns {void}
+ */
 function showProfileTooltipForElement(anchorEl, profile) {
   // Input validation
   if (!anchorEl || !(anchorEl instanceof Element)) {
@@ -270,10 +317,10 @@ function showProfileTooltipForElement(anchorEl, profile) {
     if (!document.contains(tooltip)) {
       return;
     }
-    const tooltipWidth = tooltip.offsetWidth || tooltip.clientWidth || 380;
+    const tooltipWidth = tooltip.offsetWidth || tooltip.clientWidth || TOOLTIP_MAX_WIDTH;
     const rect = anchorEl.getBoundingClientRect();
-    const top = rect.bottom + window.scrollY + 8;
-    const left = Math.min(window.innerWidth - 20 - tooltipWidth, Math.max(8, rect.left + window.scrollX));
+    const top = rect.bottom + window.scrollY + TOOLTIP_OFFSET;
+    const left = Math.min(window.innerWidth - TOOLTIP_VIEWPORT_MARGIN - tooltipWidth, Math.max(TOOLTIP_VIEWPORT_MARGIN, rect.left + window.scrollX));
     tooltip.style.top = `${top}px`;
     tooltip.style.left = `${left}px`;
   });
@@ -299,6 +346,10 @@ function showProfileTooltipForElement(anchorEl, profile) {
   };
 }
 
+/**
+ * Hides currently displayed profile tooltip
+ * @returns {void}
+ */
 function hideProfileTooltip() {
   if (currentTooltip) {
     if (currentTooltip._cleanup) currentTooltip._cleanup();

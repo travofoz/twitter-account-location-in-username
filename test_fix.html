@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Duplicate Globe Fix</title>
+</head>
+<body>
+    <h1>Test Duplicate Globe Fix</h1>
+    
+    <!-- Simulate Twitter tweet structure -->
+    <article data-testid="tweet" data-username-processed="testuser">
+        <div>
+            <div>
+                <div>
+                    <div data-testid="User-Name">
+                        <a href="/testuser">@testuser</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </article>
+
+    <script>
+        // Test the container selection logic
+        const containers = document.querySelectorAll('article[data-testid="tweet"], [data-testid="UserCell"]');
+        console.log('Found containers:', containers.length);
+        
+        containers.forEach((container, index) => {
+            console.log(`Container ${index}:`, container.dataset.testid, container.dataset.usernameProcessed);
+        });
+        
+        // Test that we only get the article, not the User-Name
+        console.log('Should only find 1 container (the article)');
+    </script>
+</body>
+</html>

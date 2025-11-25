@@ -1,7 +1,18 @@
-// Popup script for extension toggle
+/**
+ * @fileoverview Popup script for extension toggle and cache management
+ * @module popup
+ */
+
+/** @constant {string} Storage key for extension toggle state */
 const TOGGLE_KEY = 'extension_enabled';
+/** @constant {string} Storage key for cache data */
 const CACHE_KEY = 'twitter_location_cache';
+/** @constant {boolean} Default enabled state */
 const DEFAULT_ENABLED = true;
+/** @constant {string} Extension enabled color */
+const ENABLED_COLOR = '#1d9bf0';
+/** @constant {string} Extension disabled color */
+const DISABLED_COLOR = '#536471';
 
 // Get elements
 const toggleSwitch = document.getElementById('toggleSwitch');
@@ -15,7 +26,9 @@ chrome.storage.local.get([TOGGLE_KEY], (result) => {
   updateToggle(isEnabled);
 });
 
-// Update cache size display
+/**
+ * Updates the cache size display in the popup
+ */
 function updateCacheSize() {
   chrome.storage.local.get([CACHE_KEY], (result) => {
     const cache = result[CACHE_KEY] || {};
@@ -73,15 +86,19 @@ clearCacheBtn.addEventListener('click', () => {
   }
 });
 
+/**
+ * Updates the toggle switch UI based on enabled state
+ * @param {boolean} isEnabled - Whether the extension is enabled
+ */
 function updateToggle(isEnabled) {
   if (isEnabled) {
     toggleSwitch.classList.add('enabled');
     status.textContent = 'Extension is enabled';
-    status.style.color = '#1d9bf0';
+    status.style.color = ENABLED_COLOR;
   } else {
     toggleSwitch.classList.remove('enabled');
     status.textContent = 'Extension is disabled';
-    status.style.color = '#536471';
+    status.style.color = DISABLED_COLOR;
   }
 }
 

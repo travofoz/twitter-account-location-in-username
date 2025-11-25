@@ -1,11 +1,27 @@
-// Cache management for locations and full profiles
-const locationCache = new Map();
-const fullProfileCache = new Map();
-const CACHE_KEY = 'twitter_location_cache';
-const CACHE_EXPIRY_DAYS = 30;
-const MAX_CACHE_SIZE = 500; // LRU eviction limit
+/**
+ * @fileoverview Cache management for Twitter profile locations and full profiles
+ * @module cache
+ */
 
-// LRU eviction: removes oldest entry if cache exceeds max size
+/** @type {Map<string, {location: string|null, locationAccurate: boolean|null}|null>} */
+const locationCache = new Map();
+/** @type {Map<string, Object>} */
+const fullProfileCache = new Map();
+
+/** @constant {string} Storage key for cache data */
+const CACHE_KEY = 'twitter_location_cache';
+/** @constant {number} Number of days before cache entries expire */
+const CACHE_EXPIRY_DAYS = 30;
+/** @constant {number} Maximum number of entries in cache before LRU eviction */
+const MAX_CACHE_SIZE = 500;
+/** @constant {number} Cache save debounce delay in milliseconds */
+const CACHE_SAVE_DELAY = 5000;
+
+/**
+ * Evicts the oldest entry from a cache map if it exceeds maximum size (LRU eviction)
+ * @param {Map<string, any>} map - The cache map to evict from
+ * @returns {void}
+ */
 function evictLRUEntry(map) {
   if (map.size >= MAX_CACHE_SIZE) {
     const firstKey = map.keys().next().value;
@@ -16,6 +32,10 @@ function evictLRUEntry(map) {
   }
 }
 
+/**
+ * Loads cached data from Chrome storage into memory caches
+ * @returns {Promise<void>}
+ */
 async function loadCache() {
   try {
     if (!chrome.runtime?.id) {
@@ -61,6 +81,10 @@ async function loadCache() {
   }
 }
 
+/**
+ * Saves current cache data to Chrome storage with expiry timestamps
+ * @returns {Promise<void>}
+ */
 async function saveCache() {
   try {
     if (!chrome.runtime?.id) {
@@ -101,6 +125,12 @@ async function saveCache() {
   }
 }
 
+/**
+ * Saves a location cache entry with debounced persistence
+ * @param {string} username - The Twitter username
+ * @param {{location: string|null, locationAccurate: boolean|null}|null} location - Location data to cache
+ * @returns {void}
+ */
 function saveCacheEntry(username, location) {
   if (!chrome.runtime?.id) return;
   evictLRUEntry(locationCache);
@@ -109,10 +139,16 @@ function saveCacheEntry(username, location) {
     saveCache.timeout = setTimeout(async () => {
       await saveCache();
       saveCache.timeout = null;
-    }, 5000);
+    }, CACHE_SAVE_DELAY);
   }
 }
 
+/**
+ * Saves a full profile object to cache with debounced persistence
+ * @param {string} username - The Twitter username
+ * @param {Object} profileObj - The full profile object to cache
+ * @returns {void}
+ */
 function saveFullProfile(username, profileObj) {
   if (!username) return;
   evictLRUEntry(fullProfileCache);
@@ -125,14 +161,23 @@ function saveFullProfile(username, profileObj) {
     saveCache.timeout = setTimeout(async () => {
       await saveCache();
       saveCache.timeout = null;
-    }, 5000);
+    }, CACHE_SAVE_DELAY);
   }
 }
 
+/**
+ * Checks if cached data exists for a given screen name
+ * @param {string} screenName - The Twitter username to check
+ * @returns {boolean} True if cached data exists
+ */
 function hasCachedData(screenName) {
   return fullProfileCache.has(screenName) || (locationCache.has(screenName) && locationCache.get(screenName) !== null);
 }
 
+/**
+ * Clears all cache data from memory and storage
+ * @returns {Promise<void>}
+ */
 function clearCache() {
   locationCache.clear();
   fullProfileCache.clear();
@@ -140,6 +185,11 @@ function clearCache() {
   return saveCache();
 }
 
+/**
+ * Clears cache data for a specific username
+ * @param {string} screenName - The Twitter username to clear from cache
+ * @returns {Promise<void>}
+ */
 function clearCacheEntry(screenName) {
   locationCache.delete(screenName);
   fullProfileCache.delete(screenName);
