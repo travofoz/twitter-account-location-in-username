@@ -91,8 +91,44 @@ function findHandleSection(container, screenName) {
 }
 
 /**
+ * Finds the display name container div for inline flag positioning
+ * This function locates the div that contains the display name link
+ * where the flag should be inserted after the container (outside the link but still inline).
+ * @param {Element} container - The UserName container element to search within
+ * @param {string} screenName - The Twitter username to find (without @)
+ * @returns {Element|null} The display name container div element or null if not found
+ */
+function findDisplayNameContainer(container, screenName) {
+  // Look for the display name link (not the @username link)
+  const displayNameLinks = container.querySelectorAll('a[href^="/"]');
+  for (const link of displayNameLinks) {
+    const href = link.getAttribute('href');
+    const match = href.match(/^\/([^\/\?]+)/);
+    
+    // Skip @username links, look for display name links
+    if (match && match[1] === screenName) {
+      const text = link.textContent?.trim();
+      // This should be the display name (not starting with @)
+      if (text && text !== `@${screenName}` && text.length > 0) {
+        // Find the container div that holds the display name link
+        // This should be the parent div that contains the <a> tag
+        const containerDiv = link.closest('div.r-1wbh5a2');
+        if (containerDiv) {
+          return containerDiv;
+        }
+        // Fallback to the link's parent div
+        if (link.parentNode) {
+          return link.parentNode;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Inserts a UI element (flag or globe) using the same positioning logic as local-beta
- * This function implements a 4-strategy approach to ensure proper placement within
+ * This function implements a 5-strategy approach to ensure proper placement within
  * Twitter's complex UserName DOM structure, handling various layout scenarios.
  * @param {Element} containerEl - The container element (article/UserCell) containing the username
  * @param {Element} uiElement - The UI element to insert (flag span or globe span)
@@ -109,12 +145,27 @@ function insertUIElement(containerEl, uiElement, screenName) {
 
   let inserted = false;
   
+  // Strategy 0: Insert after display name container but before handle section (NEW - preferred strategy)
+  // This ensures the flag appears inline with the display name but outside the profile link
+  const displayNameContainer = findDisplayNameContainer(userNameContainer, screenName);
+  if (displayNameContainer) {
+    try {
+      // Insert the flag immediately after the display name container
+      // This keeps it inline with the display name but outside the clickable link
+      displayNameContainer.parentNode.insertBefore(uiElement, displayNameContainer.nextSibling);
+      inserted = true;
+      console.log(`[UI] ✓ Inserted UI element after display name container for ${screenName}`);
+    } catch (e) {
+      console.log('[UI] Failed to insert after display name container:', e);
+    }
+  }
+  
   // Find the handle section - the div that contains the @username link
   const handleSection = findHandleSection(userNameContainer, screenName);
   
   // Strategy 1: Insert right before the handle section div (which contains @username)
   // The handle section is a direct child of User-Name container
-  if (handleSection && handleSection.parentNode === userNameContainer) {
+  if (!inserted && handleSection && handleSection.parentNode === userNameContainer) {
     try {
       userNameContainer.insertBefore(uiElement, handleSection);
       inserted = true;
@@ -371,8 +422,10 @@ function createFlagElement(screenName, profileData) {
   }
 
   flagEl.style.display = 'inline';
-  flagEl.style.marginRight = '4px';
+  flagEl.style.marginLeft = '8px';  // More space between display name and flag
+  flagEl.style.marginRight = '2px'; // Less space between flag and username
   flagEl.style.color = 'inherit';
+  flagEl.style.verticalAlign = 'middle';
   flagEl.setAttribute('data-twitter-location-flag', screenName);
   flagEl.setAttribute('role', 'button');
   flagEl.setAttribute('tabindex', '0');
@@ -392,7 +445,8 @@ function createGlobeElement(screenName) {
   globe.style.verticalAlign = 'middle';
   globe.style.cursor = 'pointer';
   globe.style.opacity = '0.6';
-  globe.style.marginRight = '4px';
+  globe.style.marginLeft = '8px';  // More space between display name and globe
+  globe.style.marginRight = '2px'; // Less space between globe and username
   globe.title = 'Click to fetch profile location';
   globe.setAttribute('data-twitter-location-globe', screenName);
   globe.setAttribute('role', 'button');
