@@ -1,8 +1,12 @@
 # AGENTS.md - Development Guidelines
 
-## Build/Test Commands
-This is a Chrome extension - no build system. Load via `chrome://extensions/` → "Load unpacked".
-- Test: Open `test_fix.html` in browser for isolated component testing
+## Fork Attribution
+
+This is a fork of original work by Rhys Sullivan (https://github.com/RhysSullivan/twitter-account-location-in-username).
+Modifications and enhancements are licensed under MIT License.
+
+## Development
+This is a Chrome extension - load via `chrome://extensions/` → "Load unpacked".
 - Debug: Use Chrome DevTools on extension popup and Twitter pages
 - Lint: No formal linting configured - follow JSDoc patterns in existing code
 
@@ -52,3 +56,13 @@ This is a Chrome extension - no build system. Load via `chrome://extensions/` �
 - Only access Twitter/X domains via host_permissions
 - Cache data in memory only, cleared on browser close
 - No telemetry or data transmission to external servers
+
+### Tooltip & UI Guidelines
+- Use hover tooltips for all interactive icons with descriptive text
+- Follow visual hierarchy: header → details → affiliates → footer
+- Use consistent spacing: 14px gaps, 16px margins for sections
+- Implement smooth transitions (0.2s) for hover states
+- Use emoji icons consistently (📍 for accurate, ⚠️ for inaccurate location)
+- Maintain accessibility with proper ARIA labels and keyboard navigation
+- Test responsive behavior with different content lengths
+- Use backdrop-filter and modern CSS for visual polish

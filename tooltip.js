@@ -1,6 +1,9 @@
 /**
  * @fileoverview Tooltip rendering and interactions for profile information
  * @module tooltip
+ * 
+ * Enhanced version with improved visual design, hover tooltips, and better UX
+ * Fork of original work by Rhys Sullivan: https://github.com/RhysSullivan/twitter-account-location-in-username
  */
 
 /** @type {Element|null} Currently displayed tooltip element */
@@ -22,12 +25,20 @@ const TOOLTIP_BORDER_RADIUS = 10;
 const TOOLTIP_OFFSET = 8;
 /** @constant {number} Tooltip minimum distance from viewport edge in pixels */
 const TOOLTIP_VIEWPORT_MARGIN = 20;
+/** @constant {number} Hover tooltip minimum distance from viewport edge in pixels */
+const HOVER_TOOLTIP_VIEWPORT_MARGIN = 10;
+/** @constant {number} Hover tooltip offset from anchor in pixels */
+const HOVER_TOOLTIP_OFFSET = 8;
 /** @constant {number} Avatar size in pixels */
 const AVATAR_SIZE = 72;
 /** @constant {number} Grid gap in pixels */
 const GRID_GAP = 10;
 /** @constant {number} Grid column gap in pixels */
 const GRID_COLUMN_GAP = 12;
+/** @constant {number} Small hover tooltip delay in milliseconds */
+const HOVER_TOOLTIP_DELAY = 800;
+/** @constant {number} Hover tooltip z-index */
+const HOVER_TOOLTIP_Z_INDEX = 9999999;
 
 /**
  * Formats a timestamp to a localized date string
@@ -43,23 +54,115 @@ function formatTimestampToDate(ts) {
 }
 
 /**
+ * Creates a hover tooltip for an element
+ * @param {Element} targetEl - The element to attach hover tooltip to
+ * @param {string} text - The tooltip text to display
+ * @returns {void}
+ */
+function createHoverTooltip(targetEl, text) {
+  if (!targetEl || !text) return;
+  
+  let hoverTooltip = null;
+  let showTimeout = null;
+  
+  function showTooltip() {
+    hideTooltip();
+    showTimeout = setTimeout(() => {
+      hoverTooltip = document.createElement('div');
+      hoverTooltip.textContent = text;
+      hoverTooltip.style.position = 'fixed';
+      hoverTooltip.style.zIndex = HOVER_TOOLTIP_Z_INDEX;
+      hoverTooltip.style.background = 'rgba(0, 0, 0, 0.9)';
+      hoverTooltip.style.color = '#fff';
+      hoverTooltip.style.padding = '6px 10px';
+      hoverTooltip.style.borderRadius = '4px';
+      hoverTooltip.style.fontSize = '12px';
+      hoverTooltip.style.fontWeight = '500';
+      hoverTooltip.style.pointerEvents = 'none';
+      hoverTooltip.style.whiteSpace = 'nowrap';
+      hoverTooltip.style.maxWidth = '200px';
+      hoverTooltip.style.wordWrap = 'break-word';
+      hoverTooltip.style.whiteSpace = 'normal';
+      hoverTooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+      
+      document.body.appendChild(hoverTooltip);
+      
+      const rect = targetEl.getBoundingClientRect();
+      const tooltipRect = hoverTooltip.getBoundingClientRect();
+      
+      let top = rect.top - tooltipRect.height - HOVER_TOOLTIP_OFFSET;
+      let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+      
+      if (top < HOVER_TOOLTIP_VIEWPORT_MARGIN) {
+        top = rect.bottom + HOVER_TOOLTIP_OFFSET;
+      }
+      if (left < HOVER_TOOLTIP_VIEWPORT_MARGIN) {
+        left = HOVER_TOOLTIP_VIEWPORT_MARGIN;
+      }
+      if (left + tooltipRect.width > window.innerWidth - HOVER_TOOLTIP_VIEWPORT_MARGIN) {
+        left = window.innerWidth - tooltipRect.width - HOVER_TOOLTIP_VIEWPORT_MARGIN;
+      }
+      
+      hoverTooltip.style.top = `${top + window.scrollY}px`;
+      hoverTooltip.style.left = `${left + window.scrollX}px`;
+    }, HOVER_TOOLTIP_DELAY);
+  }
+  
+  function hideTooltip() {
+    if (showTimeout) {
+      clearTimeout(showTimeout);
+      showTimeout = null;
+    }
+    if (hoverTooltip) {
+      hoverTooltip.remove();
+      hoverTooltip = null;
+    }
+  }
+  
+  function cleanup() {
+    hideTooltip();
+    targetEl.removeEventListener('mouseenter', showTooltip);
+    targetEl.removeEventListener('mouseleave', hideTooltip);
+    targetEl.removeEventListener('click', hideTooltip);
+  }
+  
+  targetEl.addEventListener('mouseenter', showTooltip);
+  targetEl.addEventListener('mouseleave', hideTooltip);
+  targetEl.addEventListener('click', hideTooltip);
+  
+  // Store cleanup function for potential later use
+  targetEl._hoverTooltipCleanup = cleanup;
+}
+
+/**
  * Refreshes profile data for a given screen name and updates tooltip
  * @param {string} screenName - The Twitter username to refresh
  * @returns {Promise<void>}
  */
 async function refreshProfile(screenName) {
+  if (!screenName || typeof screenName !== 'string') {
+    logError('refreshProfile', 'Invalid screenName provided', 'error');
+    return;
+  }
   if (refreshInProgress[screenName]) return;
   refreshInProgress[screenName] = true;
 
   try {
     const locGetter = window.getUserLocation || getUserLocation;
+    if (!locGetter) {
+      throw new Error('getUserLocation function not available');
+    }
+    
     const result = await locGetter(screenName, { force: true });
     const full = result?.fullResult ?? (window.fullProfileCache ? window.fullProfileCache.get(screenName) : (typeof fullProfileCache !== 'undefined' && fullProfileCache.get ? fullProfileCache.get(screenName) : null));
+    
     if (full) {
       const anchorEl = currentTooltip?._anchorEl;
       if (anchorEl) {
         const showTooltip = window.showProfileTooltipForElement || showProfileTooltipForElement;
-        showTooltip(anchorEl, full);
+        if (showTooltip) {
+          showTooltip(anchorEl, full);
+        }
       }
     }
   } catch (err) {
@@ -97,17 +200,21 @@ function createProfileTooltip(profile) {
   container.style.color = '#e7e7e7';
   container.style.padding = `${TOOLTIP_PADDING}px`;
   container.style.borderRadius = `${TOOLTIP_BORDER_RADIUS}px`;
-  container.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)';
+  container.style.boxShadow = '0 12px 40px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.3)';
   container.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
   container.style.fontSize = '13px';
-  container.style.border = '1px solid #333';
+  container.style.border = '1px solid #444';
+  container.style.backdropFilter = 'blur(10px)';
+  container.style.transition = 'opacity 0.2s ease-in-out';
 
   // Header
   const header = document.createElement('div');
   header.style.display = 'flex';
   header.style.alignItems = 'flex-start';
-  header.style.gap = '12px';
-  header.style.marginBottom = '12px';
+  header.style.gap = '14px';
+  header.style.marginBottom = '16px';
+  header.style.paddingBottom = '12px';
+  header.style.borderBottom = '1px solid #333';
 
   // Avatar (clickable) - only set link attributes when screenName exists
   const avatarLink = document.createElement('a');
@@ -150,31 +257,36 @@ function createProfileTooltip(profile) {
   textAndRefresh.style.flex = '1 1 auto';
   textAndRefresh.style.display = 'flex';
   textAndRefresh.style.flexDirection = 'column';
-  textAndRefresh.style.gap = '4px';
+  textAndRefresh.style.gap = '6px';
+  textAndRefresh.style.minWidth = '0';
 
   const displayName = document.createElement('div');
   displayName.style.fontWeight = '600';
-  displayName.style.fontSize = '15px';
+  displayName.style.fontSize = '16px';
   displayName.style.color = '#fff';
   displayName.style.display = 'flex';
   displayName.style.alignItems = 'center';
-  displayName.style.gap = '6px';
+  displayName.style.gap = '8px';
+  displayName.style.lineHeight = '1.2';
+  displayName.style.wordBreak = 'break-word';
   
   // Add verification badges
   const verificationBadges = document.createElement('div');
   verificationBadges.style.display = 'flex';
   verificationBadges.style.alignItems = 'center';
-  verificationBadges.style.gap = '4px';
+  verificationBadges.style.gap = '6px';
+  verificationBadges.style.flexShrink = '0';
   
   // Blue verified indicator
   if (profile?.is_blue_verified) {
     const blueCheck = document.createElement('span');
     blueCheck.textContent = '✓';
     blueCheck.style.color = '#1d9bf0';
-    blueCheck.style.fontSize = '16px';
+    blueCheck.style.fontSize = '18px';
     blueCheck.style.fontWeight = 'bold';
-    blueCheck.title = 'Blue Verified';
+    blueCheck.style.cursor = 'help';
     verificationBadges.appendChild(blueCheck);
+    createHoverTooltip(blueCheck, 'Blue Verified');
   }
   
   // Government/Business verification type
@@ -182,24 +294,27 @@ function createProfileTooltip(profile) {
   if (verificationType === 'Government') {
     const govBadge = document.createElement('span');
     govBadge.textContent = '🏛️';
-    govBadge.title = 'Government Verified';
-    govBadge.style.fontSize = '14px';
+    govBadge.style.fontSize = '16px';
+    govBadge.style.cursor = 'help';
     verificationBadges.appendChild(govBadge);
+    createHoverTooltip(govBadge, 'Government Verified');
   } else if (verificationType === 'Business') {
     const bizBadge = document.createElement('span');
     bizBadge.textContent = '🏢';
-    bizBadge.title = 'Business Verified';
-    bizBadge.style.fontSize = '14px';
+    bizBadge.style.fontSize = '16px';
+    bizBadge.style.cursor = 'help';
     verificationBadges.appendChild(bizBadge);
+    createHoverTooltip(bizBadge, 'Business Verified');
   }
   
   // Protected account indicator
   if (profile?.privacy?.protected) {
     const protectedBadge = document.createElement('span');
     protectedBadge.textContent = '🔒';
-    protectedBadge.title = 'Protected Account';
-    protectedBadge.style.fontSize = '14px';
+    protectedBadge.style.fontSize = '16px';
+    protectedBadge.style.cursor = 'help';
     verificationBadges.appendChild(protectedBadge);
+    createHoverTooltip(protectedBadge, 'Protected Account - Only approved followers can see tweets');
   }
   
   const nameText = document.createElement('span');
@@ -212,8 +327,9 @@ function createProfileTooltip(profile) {
   handle.style.fontSize = '13px';
   handle.style.display = 'flex';
   handle.style.alignItems = 'center';
-  handle.style.gap = '6px';
+  handle.style.gap = '8px';
   handle.style.cursor = 'pointer';
+  handle.style.transition = 'color 0.2s';
   
   const handleText = document.createElement('span');
   handleText.textContent = `@${profile?.core?.screen_name || ''}`;
@@ -222,53 +338,104 @@ function createProfileTooltip(profile) {
   // Copy button for username
   const copyBtn = document.createElement('button');
   copyBtn.textContent = '📋';
-  copyBtn.title = 'Copy username';
   copyBtn.setAttribute('aria-label', 'Copy username to clipboard');
   copyBtn.style.border = 'none';
   copyBtn.style.background = 'transparent';
   copyBtn.style.cursor = 'pointer';
-  copyBtn.style.fontSize = '12px';
-  copyBtn.style.padding = '0';
+  copyBtn.style.fontSize = '14px';
+  copyBtn.style.padding = '2px';
+  copyBtn.style.borderRadius = '3px';
   copyBtn.style.color = '#666';
-  copyBtn.style.transition = 'color 0.2s';
-  copyBtn.addEventListener('mouseenter', () => { copyBtn.style.color = '#1d9bf0'; });
-  copyBtn.addEventListener('mouseleave', () => { copyBtn.style.color = '#666'; });
+  copyBtn.style.transition = 'all 0.2s';
+  copyBtn.style.display = 'flex';
+  copyBtn.style.alignItems = 'center';
+  copyBtn.style.justifyContent = 'center';
+  copyBtn.addEventListener('mouseenter', () => { 
+    copyBtn.style.color = '#1d9bf0';
+    copyBtn.style.background = 'rgba(29, 155, 240, 0.1)';
+  });
+  copyBtn.addEventListener('mouseleave', () => { 
+    copyBtn.style.color = '#666';
+    copyBtn.style.background = 'transparent';
+  });
   copyBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const username = profile?.core?.screen_name;
     if (username) {
-      navigator.clipboard.writeText(username).then(() => {
-        copyBtn.textContent = '✓';
-        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
-      }).catch(err => {
-        if (typeof logError === 'function') {
-          logError('copyUsername', err);
-        } else {
-          console.error('Failed to copy username:', err);
-        }
-      });
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(username).then(() => {
+          copyBtn.textContent = '✓';
+          setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+        }).catch(err => {
+          if (typeof logError === 'function') {
+            logError('copyUsername', err);
+          } else {
+            console.error('Failed to copy username:', err);
+          }
+          // Fallback for clipboard API failure
+          copyToClipboardFallback(username);
+        });
+      } else {
+        // Fallback for browsers without clipboard API
+        copyToClipboardFallback(username);
+      }
     }
   });
-  handle.appendChild(copyBtn);
-
-  textAndRefresh.appendChild(displayName);
-  textAndRefresh.appendChild(handle);
+  
+  function copyToClipboardFallback(text) {
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      
+      if (successful) {
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      } else {
+        throw new Error('execCommand failed');
+      }
+    } catch (err) {
+      if (typeof logError === 'function') {
+        logError('copyUsernameFallback', err);
+      } else {
+        console.error('Failed to copy username (fallback):', err);
+      }
+    }
+  }
 
   // Refresh button
   const refreshBtn = document.createElement('button');
   refreshBtn.textContent = '🔄';
-  refreshBtn.title = 'Refresh profile';
   refreshBtn.setAttribute('aria-label', 'Refresh profile information');
   refreshBtn.style.border = 'none';
   refreshBtn.style.background = 'transparent';
   refreshBtn.style.cursor = 'pointer';
-  refreshBtn.style.fontSize = '16px';
-  refreshBtn.style.padding = '0';
+  refreshBtn.style.fontSize = '18px';
+  refreshBtn.style.padding = '4px';
+  refreshBtn.style.borderRadius = '4px';
   refreshBtn.style.color = '#8a8a8a';
-  refreshBtn.style.transition = 'transform 0.3s, color 0.2s';
+  refreshBtn.style.transition = 'all 0.2s';
   refreshBtn.style.flex = '0 0 auto';
-  refreshBtn.addEventListener('mouseenter', () => { refreshBtn.style.color = '#1d9bf0'; });
-  refreshBtn.addEventListener('mouseleave', () => { refreshBtn.style.color = '#8a8a8a'; });
+  refreshBtn.style.display = 'flex';
+  refreshBtn.style.alignItems = 'center';
+  refreshBtn.style.justifyContent = 'center';
+  refreshBtn.addEventListener('mouseenter', () => { 
+    refreshBtn.style.color = '#1d9bf0';
+    refreshBtn.style.background = 'rgba(29, 155, 240, 0.1)';
+    refreshBtn.style.transform = 'scale(1.1)';
+  });
+  refreshBtn.addEventListener('mouseleave', () => { 
+    refreshBtn.style.color = '#8a8a8a';
+    refreshBtn.style.background = 'transparent';
+    refreshBtn.style.transform = 'scale(1)';
+  });
   refreshBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!refreshInProgress[profile?.core?.screen_name]) {
@@ -278,7 +445,7 @@ function createProfileTooltip(profile) {
       });
     }
   });
-
+  createHoverTooltip(refreshBtn, 'Refresh profile information');
   header.appendChild(avatarLink);
   header.appendChild(textAndRefresh);
   header.appendChild(refreshBtn);
@@ -293,32 +460,38 @@ function createProfileTooltip(profile) {
 
   // Details section with improved layout
   const detailsSection = document.createElement('div');
-  detailsSection.style.marginTop = '12px';
+  detailsSection.style.marginTop = '16px';
   
   const sectionTitle = document.createElement('div');
-  sectionTitle.style.fontSize = '11px';
-  sectionTitle.style.color = '#666';
+  sectionTitle.style.fontSize = '12px';
+  sectionTitle.style.color = '#999';
   sectionTitle.style.textTransform = 'uppercase';
-  sectionTitle.style.letterSpacing = '0.5px';
-  sectionTitle.style.marginBottom = '8px';
+  sectionTitle.style.letterSpacing = '0.8px';
+  sectionTitle.style.marginBottom = '12px';
   sectionTitle.style.fontWeight = '600';
-  sectionTitle.textContent = 'Account Details';
+  sectionTitle.style.display = 'flex';
+  sectionTitle.style.alignItems = 'center';
+  sectionTitle.style.gap = '6px';
+  sectionTitle.textContent = '📊 Account Details';
   detailsSection.appendChild(sectionTitle);
   
   const grid = document.createElement('div');
   grid.style.display = 'grid';
-  grid.style.gridTemplateColumns = '1fr 1fr';
-  grid.style.gap = `${GRID_GAP}px ${GRID_COLUMN_GAP}px`;
-  grid.style.marginBottom = '12px';
-  grid.style.paddingBottom = '12px';
+  grid.style.gridTemplateColumns = '1fr 1.5fr';
+  grid.style.gap = `${GRID_GAP + 2}px ${GRID_COLUMN_GAP}px`;
+  grid.style.marginBottom = '16px';
+  grid.style.paddingBottom = '16px';
   grid.style.borderBottom = '1px solid #333';
+  grid.style.alignItems = 'start';
 
   function addRow(label, value) {
     const l = document.createElement('div');
     l.style.fontSize = '11px';
-    l.style.color = '#8a8a8a';
+    l.style.color = '#999';
     l.style.textTransform = 'uppercase';
     l.style.letterSpacing = '0.5px';
+    l.style.fontWeight = '600';
+    l.style.lineHeight = '1.4';
     l.textContent = label;
 
     const v = document.createElement('div');
@@ -326,45 +499,45 @@ function createProfileTooltip(profile) {
     v.style.color = '#e7e7e7';
     v.style.fontWeight = '500';
     v.style.wordBreak = 'break-word';
-    v.style.lineHeight = '1.3';
+    v.style.lineHeight = '1.4';
+    v.style.paddingTop = '2px';
     
-    // Handle HTML content for values with icons/links - sanitize for security
-    if (value && (value.includes('📍') || value.includes('<a'))) {
-      // Only allow specific safe HTML patterns
-      if (value.includes('<a')) {
-        // Create a temporary element to safely parse the HTML
-        const temp = document.createElement('div');
-        temp.innerHTML = value;
-        // Only keep anchor tags with safe attributes
-        const links = temp.querySelectorAll('a');
-        links.forEach(link => {
-          // Ensure href starts with https://twitter.com/ or is safe
-          if (link.href && !link.href.startsWith('https://twitter.com/')) {
-            link.href = '#';
-            link.removeAttribute('target');
-            link.removeAttribute('rel');
-          }
-        });
-        v.innerHTML = temp.innerHTML;
-      } else {
-        // For emoji-only content, use textContent
-        v.textContent = value;
-      }
+    // Handle content safely - avoid XSS by using textContent for all values
+    if (value && (value.includes('📍') || value.includes('⚠️'))) {
+      // For emoji content, use textContent to preserve emojis safely
+      v.textContent = value;
     } else {
       v.textContent = value || '-';
     }
 
     grid.appendChild(l);
     grid.appendChild(v);
+    
+    return { label: l, value: v };
   }
 
   // Location with accuracy indicator
   const location = profile?.about_profile?.account_based_in || profile?.about_profile?.source || '-';
   const locationAccurate = profile?.about_profile?.location_accurate;
-  const locationText = locationAccurate === true ? `📍 ${location}` : 
-                      locationAccurate === false ? `📍‍🗺️ ${location}` : 
-                      location;
-  addRow('Location', locationText);
+  let locationText = location;
+  let locationTitle = '';
+  
+  if (locationAccurate === true) {
+    locationText = `📍 ${location}`;
+    locationTitle = 'Precise location';
+  } else if (locationAccurate === false) {
+    locationText = `⚠️ ${location}`;
+    locationTitle = 'Location may be inaccurate (VPN/Proxy detected)';
+  }
+  
+  const locationRow = addRow('Location', locationText);
+  if (locationTitle) {
+    const valueCell = locationRow.value;
+    if (valueCell) {
+      valueCell.style.cursor = 'help';
+      createHoverTooltip(valueCell, locationTitle);
+    }
+  }
 
   // Account age calculation
   let accountAge = '-';
@@ -422,7 +595,7 @@ function createProfileTooltip(profile) {
   // Enhanced Affiliates section
   const affiliateSection = document.createElement('div');
   affiliateSection.style.marginTop = '0';
-  affiliateSection.style.marginBottom = '8px';
+  affiliateSection.style.marginBottom = '12px';
   
   // Check for affiliate information from multiple sources
   const affiliateLabel = profile?.affiliates_highlighted_label?.label || 
@@ -432,10 +605,11 @@ function createProfileTooltip(profile) {
     const affiliateContainer = document.createElement('div');
     affiliateContainer.style.display = 'flex';
     affiliateContainer.style.alignItems = 'center';
-    affiliateContainer.style.gap = '8px';
-    affiliateContainer.style.padding = '6px 0';
-    affiliateContainer.style.borderTop = '1px solid #333';
-    affiliateContainer.style.borderBottom = '1px solid #333';
+    affiliateContainer.style.gap = '10px';
+    affiliateContainer.style.padding = '10px';
+    affiliateContainer.style.background = 'rgba(29, 155, 240, 0.05)';
+    affiliateContainer.style.border = '1px solid rgba(29, 155, 240, 0.2)';
+    affiliateContainer.style.borderRadius = '6px';
     affiliateContainer.style.marginTop = '8px';
     
     // Affiliate badge image
@@ -443,10 +617,11 @@ function createProfileTooltip(profile) {
       const badgeImg = document.createElement('img');
       badgeImg.src = affiliateLabel.badge.url;
       badgeImg.alt = affiliateLabel.description;
-      badgeImg.style.width = '20px';
-      badgeImg.style.height = '20px';
+      badgeImg.style.width = '24px';
+      badgeImg.style.height = '24px';
       badgeImg.style.borderRadius = '4px';
       badgeImg.style.objectFit = 'cover';
+      badgeImg.style.flexShrink = '0';
       badgeImg.onerror = () => { badgeImg.style.display = 'none'; };
       affiliateContainer.appendChild(badgeImg);
     }
@@ -461,22 +636,32 @@ function createProfileTooltip(profile) {
     
     const labelText = document.createElement('div');
     labelText.style.fontSize = '11px';
-    labelText.style.color = '#8a8a8a';
+    labelText.style.color = '#1d9bf0';
     labelText.style.textTransform = 'uppercase';
     labelText.style.letterSpacing = '0.5px';
+    labelText.style.fontWeight = '600';
     labelText.textContent = typeIcon + ' ' + affiliateLabelType.replace('Label', '');
     
     const affiliateLink = document.createElement('a');
-    affiliateLink.href = affiliateLabel.url?.url || '#';
+    const url = affiliateLabel.url?.url;
+    affiliateLink.href = (url && url.startsWith('https://')) ? url : '#';
     affiliateLink.target = '_blank';
     affiliateLink.rel = 'noopener noreferrer';
-    affiliateLink.style.color = '#1d9bf0';
+    affiliateLink.style.color = '#e7e7e7';
     affiliateLink.style.textDecoration = 'none';
     affiliateLink.style.fontSize = '13px';
     affiliateLink.style.fontWeight = '500';
+    affiliateLink.style.lineHeight = '1.3';
+    affiliateLink.style.wordBreak = 'break-word';
     affiliateLink.textContent = affiliateLabel.description;
-    affiliateLink.onmouseenter = () => { affiliateLink.style.textDecoration = 'underline'; };
-    affiliateLink.onmouseleave = () => { affiliateLink.style.textDecoration = 'none'; };
+    affiliateLink.onmouseenter = () => { 
+      affiliateLink.style.textDecoration = 'underline';
+      affiliateLink.style.color = '#1d9bf0';
+    };
+    affiliateLink.onmouseleave = () => { 
+      affiliateLink.style.textDecoration = 'none';
+      affiliateLink.style.color = '#e7e7e7';
+    };
     
     affiliateText.appendChild(labelText);
     affiliateText.appendChild(affiliateLink);
@@ -490,14 +675,25 @@ function createProfileTooltip(profile) {
   if (affiliateUsername) {
     const affiliateUser = document.createElement('div');
     affiliateUser.style.fontSize = '12px';
-    affiliateUser.style.color = '#a0a0a0';
-    affiliateUser.style.marginTop = '4px';
+    affiliateUser.style.color = '#999';
+    affiliateUser.style.marginTop = '8px';
+    affiliateUser.style.padding = '6px 10px';
+    affiliateUser.style.background = 'rgba(0, 0, 0, 0.2)';
+    affiliateUser.style.borderRadius = '4px';
+    affiliateUser.style.display = 'flex';
+    affiliateUser.style.alignItems = 'center';
+    affiliateUser.style.gap = '6px';
+    
+    affiliateUser.appendChild(document.createTextNode('🔗'));
+    
     const affiliateLink = document.createElement('a');
-    affiliateLink.href = `https://twitter.com/${affiliateUsername}`;
+    affiliateLink.href = affiliateUsername ? `https://twitter.com/${encodeURIComponent(affiliateUsername)}` : '#';
     affiliateLink.target = '_blank';
     affiliateLink.rel = 'noopener noreferrer';
     affiliateLink.style.color = '#1d9bf0';
     affiliateLink.style.textDecoration = 'none';
+    affiliateLink.style.fontSize = '12px';
+    affiliateLink.style.fontWeight = '500';
     affiliateLink.textContent = `@${affiliateUsername}`;
     affiliateLink.onmouseenter = () => { affiliateLink.style.textDecoration = 'underline'; };
     affiliateLink.onmouseleave = () => { affiliateLink.style.textDecoration = 'none'; };
@@ -513,8 +709,8 @@ function createProfileTooltip(profile) {
 
   // Footer with actions and hint
   const footer = document.createElement('div');
-  footer.style.marginTop = '12px';
-  footer.style.paddingTop = '8px';
+  footer.style.marginTop = '16px';
+  footer.style.paddingTop = '12px';
   footer.style.borderTop = '1px solid #333';
   footer.style.display = 'flex';
   footer.style.justifyContent = 'space-between';
@@ -523,7 +719,7 @@ function createProfileTooltip(profile) {
   // Action buttons
   const actions = document.createElement('div');
   actions.style.display = 'flex';
-  actions.style.gap = '8px';
+  actions.style.gap = '10px';
   
   // Profile link button
   if (screenName) {
@@ -536,18 +732,24 @@ function createProfileTooltip(profile) {
     profileBtn.style.color = '#1d9bf0';
     profileBtn.style.cursor = 'pointer';
     profileBtn.style.fontSize = '11px';
-    profileBtn.style.padding = '4px 8px';
-    profileBtn.style.borderRadius = '4px';
-    profileBtn.style.transition = 'background-color 0.2s, border-color 0.2s';
+    profileBtn.style.padding = '6px 12px';
+    profileBtn.style.borderRadius = '6px';
+    profileBtn.style.transition = 'all 0.2s';
+    profileBtn.style.fontWeight = '600';
+    profileBtn.style.letterSpacing = '0.3px';
     profileBtn.addEventListener('mouseenter', () => { 
       profileBtn.style.backgroundColor = '#1d9bf0'; 
       profileBtn.style.color = '#fff';
       profileBtn.style.borderColor = '#1d9bf0';
+      profileBtn.style.transform = 'translateY(-1px)';
+      profileBtn.style.boxShadow = '0 2px 8px rgba(29, 155, 240, 0.3)';
     });
     profileBtn.addEventListener('mouseleave', () => { 
       profileBtn.style.backgroundColor = 'transparent'; 
       profileBtn.style.color = '#1d9bf0';
       profileBtn.style.borderColor = '#333';
+      profileBtn.style.transform = 'translateY(0)';
+      profileBtn.style.boxShadow = 'none';
     });
     profileBtn.addEventListener('click', () => {
       window.open(`https://twitter.com/${screenName}`, '_blank', 'noopener,noreferrer');
@@ -562,7 +764,12 @@ function createProfileTooltip(profile) {
   hint.style.fontSize = '10px';
   hint.style.color = '#666';
   hint.style.textAlign = 'right';
-  hint.textContent = 'ESC to close';
+  hint.style.fontWeight = '500';
+  hint.style.letterSpacing = '0.3px';
+  hint.style.display = 'flex';
+  hint.style.alignItems = 'center';
+  hint.style.gap = '4px';
+  hint.textContent = '⌨️ ESC to close';
   footer.appendChild(hint);
   
   container.appendChild(footer);
