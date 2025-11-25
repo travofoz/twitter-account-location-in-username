@@ -63,7 +63,11 @@ async function refreshProfile(screenName) {
       }
     }
   } catch (err) {
-    console.error('Error refreshing profile:', err);
+    if (typeof logError === 'function') {
+      logError('refreshProfile', err);
+    } else {
+      console.error('Error refreshing profile:', err);
+    }
   } finally {
     delete refreshInProgress[screenName];
   }
@@ -83,6 +87,8 @@ function createProfileTooltip(profile) {
 
   const container = document.createElement('div');
   container.setAttribute('data-twitter-profile-tooltip', 'true');
+  container.setAttribute('role', 'tooltip');
+  container.setAttribute('aria-live', 'polite');
   container.style.position = 'absolute';
   container.style.zIndex = 999999;
   container.style.minWidth = `${TOOLTIP_MIN_WIDTH}px`;
@@ -150,12 +156,100 @@ function createProfileTooltip(profile) {
   displayName.style.fontWeight = '600';
   displayName.style.fontSize = '15px';
   displayName.style.color = '#fff';
-  displayName.textContent = profile?.core?.name || profile?.core?.screen_name || '';
+  displayName.style.display = 'flex';
+  displayName.style.alignItems = 'center';
+  displayName.style.gap = '6px';
+  
+  // Add verification badges
+  const verificationBadges = document.createElement('div');
+  verificationBadges.style.display = 'flex';
+  verificationBadges.style.alignItems = 'center';
+  verificationBadges.style.gap = '4px';
+  
+  // Blue verified indicator
+  if (profile?.is_blue_verified) {
+    const blueCheck = document.createElement('span');
+    blueCheck.textContent = '✓';
+    blueCheck.style.color = '#1d9bf0';
+    blueCheck.style.fontSize = '16px';
+    blueCheck.style.fontWeight = 'bold';
+    blueCheck.title = 'Blue Verified';
+    verificationBadges.appendChild(blueCheck);
+  }
+  
+  // Government/Business verification type
+  const verificationType = profile?.verification?.verified_type;
+  if (verificationType === 'Government') {
+    const govBadge = document.createElement('span');
+    govBadge.textContent = '🏛️';
+    govBadge.title = 'Government Verified';
+    govBadge.style.fontSize = '14px';
+    verificationBadges.appendChild(govBadge);
+  } else if (verificationType === 'Business') {
+    const bizBadge = document.createElement('span');
+    bizBadge.textContent = '🏢';
+    bizBadge.title = 'Business Verified';
+    bizBadge.style.fontSize = '14px';
+    verificationBadges.appendChild(bizBadge);
+  }
+  
+  // Protected account indicator
+  if (profile?.privacy?.protected) {
+    const protectedBadge = document.createElement('span');
+    protectedBadge.textContent = '🔒';
+    protectedBadge.title = 'Protected Account';
+    protectedBadge.style.fontSize = '14px';
+    verificationBadges.appendChild(protectedBadge);
+  }
+  
+  const nameText = document.createElement('span');
+  nameText.textContent = profile?.core?.name || profile?.core?.screen_name || '';
+  displayName.appendChild(nameText);
+  displayName.appendChild(verificationBadges);
 
   const handle = document.createElement('div');
   handle.style.color = '#8a8a8a';
   handle.style.fontSize = '13px';
-  handle.textContent = `@${profile?.core?.screen_name || ''}`;
+  handle.style.display = 'flex';
+  handle.style.alignItems = 'center';
+  handle.style.gap = '6px';
+  handle.style.cursor = 'pointer';
+  
+  const handleText = document.createElement('span');
+  handleText.textContent = `@${profile?.core?.screen_name || ''}`;
+  handle.appendChild(handleText);
+  
+  // Copy button for username
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = '📋';
+  copyBtn.title = 'Copy username';
+  copyBtn.setAttribute('aria-label', 'Copy username to clipboard');
+  copyBtn.style.border = 'none';
+  copyBtn.style.background = 'transparent';
+  copyBtn.style.cursor = 'pointer';
+  copyBtn.style.fontSize = '12px';
+  copyBtn.style.padding = '0';
+  copyBtn.style.color = '#666';
+  copyBtn.style.transition = 'color 0.2s';
+  copyBtn.addEventListener('mouseenter', () => { copyBtn.style.color = '#1d9bf0'; });
+  copyBtn.addEventListener('mouseleave', () => { copyBtn.style.color = '#666'; });
+  copyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const username = profile?.core?.screen_name;
+    if (username) {
+      navigator.clipboard.writeText(username).then(() => {
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      }).catch(err => {
+        if (typeof logError === 'function') {
+          logError('copyUsername', err);
+        } else {
+          console.error('Failed to copy username:', err);
+        }
+      });
+    }
+  });
+  handle.appendChild(copyBtn);
 
   textAndRefresh.appendChild(displayName);
   textAndRefresh.appendChild(handle);
@@ -164,6 +258,7 @@ function createProfileTooltip(profile) {
   const refreshBtn = document.createElement('button');
   refreshBtn.textContent = '🔄';
   refreshBtn.title = 'Refresh profile';
+  refreshBtn.setAttribute('aria-label', 'Refresh profile information');
   refreshBtn.style.border = 'none';
   refreshBtn.style.background = 'transparent';
   refreshBtn.style.cursor = 'pointer';
@@ -196,14 +291,26 @@ function createProfileTooltip(profile) {
     document.head.appendChild(style);
   }
 
-  // Details grid
+  // Details section with improved layout
+  const detailsSection = document.createElement('div');
+  detailsSection.style.marginTop = '12px';
+  
+  const sectionTitle = document.createElement('div');
+  sectionTitle.style.fontSize = '11px';
+  sectionTitle.style.color = '#666';
+  sectionTitle.style.textTransform = 'uppercase';
+  sectionTitle.style.letterSpacing = '0.5px';
+  sectionTitle.style.marginBottom = '8px';
+  sectionTitle.style.fontWeight = '600';
+  sectionTitle.textContent = 'Account Details';
+  detailsSection.appendChild(sectionTitle);
+  
   const grid = document.createElement('div');
-  grid.style.marginTop = '0';
   grid.style.display = 'grid';
   grid.style.gridTemplateColumns = '1fr 1fr';
   grid.style.gap = `${GRID_GAP}px ${GRID_COLUMN_GAP}px`;
-  grid.style.marginBottom = '10px';
-  grid.style.paddingBottom = '10px';
+  grid.style.marginBottom = '12px';
+  grid.style.paddingBottom = '12px';
   grid.style.borderBottom = '1px solid #333';
 
   function addRow(label, value) {
@@ -219,21 +326,66 @@ function createProfileTooltip(profile) {
     v.style.color = '#e7e7e7';
     v.style.fontWeight = '500';
     v.style.wordBreak = 'break-word';
-    v.textContent = value || '-';
+    v.style.lineHeight = '1.3';
+    
+    // Handle HTML content for values with icons/links - sanitize for security
+    if (value && (value.includes('📍') || value.includes('<a'))) {
+      // Only allow specific safe HTML patterns
+      if (value.includes('<a')) {
+        // Create a temporary element to safely parse the HTML
+        const temp = document.createElement('div');
+        temp.innerHTML = value;
+        // Only keep anchor tags with safe attributes
+        const links = temp.querySelectorAll('a');
+        links.forEach(link => {
+          // Ensure href starts with https://twitter.com/ or is safe
+          if (link.href && !link.href.startsWith('https://twitter.com/')) {
+            link.href = '#';
+            link.removeAttribute('target');
+            link.removeAttribute('rel');
+          }
+        });
+        v.innerHTML = temp.innerHTML;
+      } else {
+        // For emoji-only content, use textContent
+        v.textContent = value;
+      }
+    } else {
+      v.textContent = value || '-';
+    }
 
     grid.appendChild(l);
     grid.appendChild(v);
   }
 
-  addRow('Location', profile?.about_profile?.account_based_in || profile?.about_profile?.source || '-');
-  addRow('Accurate', typeof profile?.about_profile?.location_accurate === 'boolean' ? String(profile.about_profile.location_accurate) : '-');
+  // Location with accuracy indicator
+  const location = profile?.about_profile?.account_based_in || profile?.about_profile?.source || '-';
+  const locationAccurate = profile?.about_profile?.location_accurate;
+  const locationText = locationAccurate === true ? `📍 ${location}` : 
+                      locationAccurate === false ? `📍‍🗺️ ${location}` : 
+                      location;
+  addRow('Location', locationText);
+
+  // Account age calculation
+  let accountAge = '-';
+  if (profile?.core?.created_at) {
+    const parsed = Date.parse(profile.core.created_at);
+    if (!isNaN(parsed)) {
+      const createdDate = new Date(parsed);
+      const now = new Date();
+      const yearsDiff = (now - createdDate) / (1000 * 60 * 60 * 24 * 365.25);
+      accountAge = yearsDiff >= 1 ? `${Math.floor(yearsDiff)} years` : 
+                   yearsDiff >= 0.083 ? `${Math.floor(yearsDiff * 12)} months` : 
+                   'Less than 1 month';
+    }
+  }
+  addRow('Account Age', accountAge);
 
   let createdFormatted = '-';
   if (profile?.core?.created_at) {
     const parsed = Date.parse(profile.core.created_at);
-    const formatted = formatTimestampToDate(parsed);
-    if (formatted) {
-      createdFormatted = formatted.substring(0, 10);
+    if (!isNaN(parsed)) {
+      createdFormatted = new Date(parsed).toLocaleDateString();
     } else {
       // fallback to raw string trimmed safely
       try { createdFormatted = String(profile.core.created_at).substring(0, 10); } catch (e) { createdFormatted = '-'; }
@@ -242,44 +394,178 @@ function createProfileTooltip(profile) {
   addRow('Created', createdFormatted);
   addRow('Source', profile?.about_profile?.source || '-');
   
+  // Enhanced username changes with last changed date
   const usernameChanges = profile?.about_profile?.username_changes;
-  const changeCount = usernameChanges?.count ? `${usernameChanges.count} time(s)` : '-';
-  addRow('Username Changes', changeCount);
+  let changeText = '-';
+  if (usernameChanges?.count) {
+    changeText = `${usernameChanges.count} time(s)`;
+    if (usernameChanges.last_changed_at_msec) {
+      const lastChanged = new Date(Number(usernameChanges.last_changed_at_msec)).toLocaleDateString();
+      changeText += ` (last: ${lastChanged})`;
+    }
+  }
+  addRow('Username Changes', changeText);
   
   const verifiedSince = profile?.verification_info?.reason?.verified_since_msec;
   let verifiedFormatted = '-';
   if (verifiedSince) {
-    const formatted = formatTimestampToDate(Number(verifiedSince));
-    if (formatted) verifiedFormatted = formatted.substring(0, 10);
+    const timestamp = Number(verifiedSince);
+    if (!isNaN(timestamp)) {
+      verifiedFormatted = new Date(timestamp).toLocaleDateString();
+    }
   }
   addRow('Verified', verifiedFormatted);
 
-  container.appendChild(grid);
+  detailsSection.appendChild(grid);
+  container.appendChild(detailsSection);
 
-  // Affiliates
-  const extra = document.createElement('div');
-  extra.style.marginTop = '0';
-  extra.style.fontSize = '12px';
-  extra.style.color = '#a0a0a0';
-  extra.style.lineHeight = '1.4';
-  if (profile?.affiliates_highlighted_label?.label?.description) {
-    extra.textContent = `🏢 ${profile.affiliates_highlighted_label.label.description}`;
-  } else if (profile?.identity_profile_labels_highlighted_label?.label?.description) {
-    extra.textContent = `🏢 ${profile.identity_profile_labels_highlighted_label.label.description}`;
+  // Enhanced Affiliates section
+  const affiliateSection = document.createElement('div');
+  affiliateSection.style.marginTop = '0';
+  affiliateSection.style.marginBottom = '8px';
+  
+  // Check for affiliate information from multiple sources
+  const affiliateLabel = profile?.affiliates_highlighted_label?.label || 
+                        profile?.identity_profile_labels_highlighted_label?.label;
+  
+  if (affiliateLabel?.description) {
+    const affiliateContainer = document.createElement('div');
+    affiliateContainer.style.display = 'flex';
+    affiliateContainer.style.alignItems = 'center';
+    affiliateContainer.style.gap = '8px';
+    affiliateContainer.style.padding = '6px 0';
+    affiliateContainer.style.borderTop = '1px solid #333';
+    affiliateContainer.style.borderBottom = '1px solid #333';
+    affiliateContainer.style.marginTop = '8px';
+    
+    // Affiliate badge image
+    if (affiliateLabel.badge?.url) {
+      const badgeImg = document.createElement('img');
+      badgeImg.src = affiliateLabel.badge.url;
+      badgeImg.alt = affiliateLabel.description;
+      badgeImg.style.width = '20px';
+      badgeImg.style.height = '20px';
+      badgeImg.style.borderRadius = '4px';
+      badgeImg.style.objectFit = 'cover';
+      badgeImg.onerror = () => { badgeImg.style.display = 'none'; };
+      affiliateContainer.appendChild(badgeImg);
+    }
+    
+    // Affiliate text with link
+    const affiliateText = document.createElement('div');
+    affiliateText.style.flex = '1';
+    
+    const affiliateLabelType = affiliateLabel.userLabelType || 'Affiliation';
+    const typeIcon = affiliateLabelType === 'BusinessLabel' ? '🏢' : 
+                    affiliateLabelType === 'GovernmentLabel' ? '🏛️' : '🏢';
+    
+    const labelText = document.createElement('div');
+    labelText.style.fontSize = '11px';
+    labelText.style.color = '#8a8a8a';
+    labelText.style.textTransform = 'uppercase';
+    labelText.style.letterSpacing = '0.5px';
+    labelText.textContent = typeIcon + ' ' + affiliateLabelType.replace('Label', '');
+    
+    const affiliateLink = document.createElement('a');
+    affiliateLink.href = affiliateLabel.url?.url || '#';
+    affiliateLink.target = '_blank';
+    affiliateLink.rel = 'noopener noreferrer';
+    affiliateLink.style.color = '#1d9bf0';
+    affiliateLink.style.textDecoration = 'none';
+    affiliateLink.style.fontSize = '13px';
+    affiliateLink.style.fontWeight = '500';
+    affiliateLink.textContent = affiliateLabel.description;
+    affiliateLink.onmouseenter = () => { affiliateLink.style.textDecoration = 'underline'; };
+    affiliateLink.onmouseleave = () => { affiliateLink.style.textDecoration = 'none'; };
+    
+    affiliateText.appendChild(labelText);
+    affiliateText.appendChild(affiliateLink);
+    affiliateContainer.appendChild(affiliateText);
+    
+    affiliateSection.appendChild(affiliateContainer);
   }
-  if (extra.textContent) {
-    extra.style.marginBottom = '8px';
-    container.appendChild(extra);
+  
+  // Show affiliate username if available
+  const affiliateUsername = profile?.about_profile?.affiliate_username;
+  if (affiliateUsername) {
+    const affiliateUser = document.createElement('div');
+    affiliateUser.style.fontSize = '12px';
+    affiliateUser.style.color = '#a0a0a0';
+    affiliateUser.style.marginTop = '4px';
+    const affiliateLink = document.createElement('a');
+    affiliateLink.href = `https://twitter.com/${affiliateUsername}`;
+    affiliateLink.target = '_blank';
+    affiliateLink.rel = 'noopener noreferrer';
+    affiliateLink.style.color = '#1d9bf0';
+    affiliateLink.style.textDecoration = 'none';
+    affiliateLink.textContent = `@${affiliateUsername}`;
+    affiliateLink.onmouseenter = () => { affiliateLink.style.textDecoration = 'underline'; };
+    affiliateLink.onmouseleave = () => { affiliateLink.style.textDecoration = 'none'; };
+    
+    affiliateUser.appendChild(document.createTextNode('Affiliated with: '));
+    affiliateUser.appendChild(affiliateLink);
+    affiliateSection.appendChild(affiliateUser);
+  }
+  
+  if (affiliateSection.children.length > 0) {
+    container.appendChild(affiliateSection);
   }
 
+  // Footer with actions and hint
+  const footer = document.createElement('div');
+  footer.style.marginTop = '12px';
+  footer.style.paddingTop = '8px';
+  footer.style.borderTop = '1px solid #333';
+  footer.style.display = 'flex';
+  footer.style.justifyContent = 'space-between';
+  footer.style.alignItems = 'center';
+  
+  // Action buttons
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+  
+  // Profile link button
+  if (screenName) {
+    const profileBtn = document.createElement('button');
+    profileBtn.textContent = '👤 Profile';
+    profileBtn.title = 'Open full profile';
+    profileBtn.setAttribute('aria-label', 'Open full Twitter profile');
+    profileBtn.style.border = '1px solid #333';
+    profileBtn.style.background = 'transparent';
+    profileBtn.style.color = '#1d9bf0';
+    profileBtn.style.cursor = 'pointer';
+    profileBtn.style.fontSize = '11px';
+    profileBtn.style.padding = '4px 8px';
+    profileBtn.style.borderRadius = '4px';
+    profileBtn.style.transition = 'background-color 0.2s, border-color 0.2s';
+    profileBtn.addEventListener('mouseenter', () => { 
+      profileBtn.style.backgroundColor = '#1d9bf0'; 
+      profileBtn.style.color = '#fff';
+      profileBtn.style.borderColor = '#1d9bf0';
+    });
+    profileBtn.addEventListener('mouseleave', () => { 
+      profileBtn.style.backgroundColor = 'transparent'; 
+      profileBtn.style.color = '#1d9bf0';
+      profileBtn.style.borderColor = '#333';
+    });
+    profileBtn.addEventListener('click', () => {
+      window.open(`https://twitter.com/${screenName}`, '_blank', 'noopener,noreferrer');
+    });
+    actions.appendChild(profileBtn);
+  }
+  
+  footer.appendChild(actions);
+  
   // Close hint
   const hint = document.createElement('div');
-  hint.style.marginTop = '8px';
-  hint.style.fontSize = '11px';
+  hint.style.fontSize = '10px';
   hint.style.color = '#666';
-  hint.style.textAlign = 'center';
-  hint.textContent = 'Click outside or press ESC to close';
-  container.appendChild(hint);
+  hint.style.textAlign = 'right';
+  hint.textContent = 'ESC to close';
+  footer.appendChild(hint);
+  
+  container.appendChild(footer);
 
   return container;
 }
@@ -353,7 +639,13 @@ function showProfileTooltipForElement(anchorEl, profile) {
 function hideProfileTooltip() {
   if (currentTooltip) {
     if (currentTooltip._cleanup) currentTooltip._cleanup();
-    try { currentTooltip.remove(); } catch (e) {}
+    try { 
+      currentTooltip.remove(); 
+    } catch (e) {
+      if (typeof logError === 'function') {
+        logError('hideProfileTooltip', e);
+      }
+    }
     currentTooltip = null;
   }
 }
@@ -365,5 +657,7 @@ try {
   window.hideProfileTooltip = hideProfileTooltip;
   window.refreshProfile = refreshProfile;
 } catch (e) {
-  // Silently ignore if window is unavailable
+  if (typeof logError === 'function') {
+    logError('windowAssignment', e);
+  }
 }
