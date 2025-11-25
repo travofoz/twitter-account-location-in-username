@@ -3,6 +3,18 @@ const locationCache = new Map();
 const fullProfileCache = new Map();
 const CACHE_KEY = 'twitter_location_cache';
 const CACHE_EXPIRY_DAYS = 30;
+const MAX_CACHE_SIZE = 500; // LRU eviction limit
+
+// LRU eviction: removes oldest entry if cache exceeds max size
+function evictLRUEntry(map) {
+  if (map.size >= MAX_CACHE_SIZE) {
+    const firstKey = map.keys().next().value;
+    if (firstKey) {
+      map.delete(firstKey);
+      console.log(`Evicted old cache entry: ${firstKey}`);
+    }
+  }
+}
 
 async function loadCache() {
   try {
@@ -91,6 +103,7 @@ async function saveCache() {
 
 function saveCacheEntry(username, location) {
   if (!chrome.runtime?.id) return;
+  evictLRUEntry(locationCache);
   locationCache.set(username, location);
   if (!saveCache.timeout) {
     saveCache.timeout = setTimeout(async () => {
@@ -102,8 +115,10 @@ function saveCacheEntry(username, location) {
 
 function saveFullProfile(username, profileObj) {
   if (!username) return;
+  evictLRUEntry(fullProfileCache);
   fullProfileCache.set(username, profileObj);
   if (!locationCache.has(username)) {
+    evictLRUEntry(locationCache);
     locationCache.set(username, null);
   }
   if (!saveCache.timeout) {
@@ -118,6 +133,20 @@ function hasCachedData(screenName) {
   return fullProfileCache.has(screenName) || (locationCache.has(screenName) && locationCache.get(screenName) !== null);
 }
 
+function clearCache() {
+  locationCache.clear();
+  fullProfileCache.clear();
+  console.log('Cache cleared by user');
+  return saveCache();
+}
+
+function clearCacheEntry(screenName) {
+  locationCache.delete(screenName);
+  fullProfileCache.delete(screenName);
+  console.log(`Cache cleared for ${screenName}`);
+  return saveCache();
+}
+
 // Expose aliases on the global scope for other content scripts
 try {
   window.locationCache = locationCache;
@@ -127,6 +156,8 @@ try {
   window.saveFullProfile = saveFullProfile;
   window.loadCache = loadCache;
   window.saveCache = saveCache;
+  window.clearCache = clearCache;
+  window.clearCacheEntry = clearCacheEntry;
 } catch (e) {
   // In some environments window may be unavailable; silently ignore
 }

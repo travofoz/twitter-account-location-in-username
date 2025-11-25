@@ -7,6 +7,21 @@ let extensionEnabled = true;
 const TOGGLE_KEY = 'extension_enabled';
 const DEFAULT_ENABLED = true;
 const processingUsernames = new Set();
+let processUsernamesTimeout = null;
+
+// Performance metrics
+const metrics = {
+  totalProcessed: 0,
+  totalFlags: 0,
+  cacheHits: 0,
+  apiRequests: 0,
+  startTime: Date.now()
+};
+
+function logMetrics() {
+  const uptime = ((Date.now() - metrics.startTime) / 1000 / 60).toFixed(1);
+  console.log(`[Metrics] Uptime: ${uptime}m | Processed: ${metrics.totalProcessed} | Flags: ${metrics.totalFlags} | Cache Hits: ${metrics.cacheHits} | API Requests: ${metrics.apiRequests}`);
+}
 
 // Load enabled state
 async function loadEnabledState() {
@@ -32,23 +47,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }, 500);
     } else {
       removeAllFlags();
+      // Disconnect observer when extension is disabled
+      if (observer) {
+        observer.disconnect();
+        console.log('Observer disconnected due to extension disable');
+      }
+    }
+  } else if (request.type === 'clearCache') {
+    // Clear runtime caches
+    try {
+      const clearCacheFunc = (typeof window !== 'undefined' && window.clearCache) ? window.clearCache : (typeof clearCache === 'function' ? clearCache : null);
+      if (clearCacheFunc) {
+        clearCacheFunc();
+      }
+    } catch (e) {
+      console.error('Error clearing cache:', e);
     }
   }
 });
 
 // Helper: check if we should display cached UI instead of globe
 function hasCachedProfileData(screenName) {
-  // Prefer the compatibility helper if present
-  if (typeof window !== 'undefined' && window.hasCachedProfileData) {
-    return window.hasCachedProfileData(screenName);
+  // Use the shared caches exposed by cache.js on the window object
+  try {
+    if (typeof window !== 'undefined' && window.fullProfileCache && window.locationCache) {
+      return window.fullProfileCache.has(screenName) || (window.locationCache.has(screenName) && window.locationCache.get(screenName) !== null);
+    }
+  } catch (e) {
+    // Silently ignore if caches are not yet available
   }
-  // Fallback to direct caches (provided by cache.js)
-  return (typeof fullProfileCache !== 'undefined' && fullProfileCache.has(screenName)) || (typeof locationCache !== 'undefined' && locationCache.has(screenName) && locationCache.get(screenName) !== null);
+  // Fallback: direct global check (if cache.js hasn't loaded yet)
+  if (typeof fullProfileCache !== 'undefined' && typeof locationCache !== 'undefined') {
+    return fullProfileCache.has(screenName) || (locationCache.has(screenName) && locationCache.get(screenName) !== null);
+  }
+  return false;
 }
 
 // Function to extract username from various Twitter UI elements
 function extractUsername(element) {
-  // Try data-testid="UserName" or "User-Name" first (most reliable)
+  // Cache querySelector calls at function level to avoid redundant DOM traversal
   const usernameElement = element.querySelector('[data-testid="UserName"], [data-testid="User-Name"]');
   if (usernameElement) {
     const links = usernameElement.querySelectorAll('a[href^="/"]');
@@ -58,8 +95,8 @@ function extractUsername(element) {
       if (match && match[1]) {
         const username = match[1];
         // Filter out common routes
-        const excludedRoutes = ['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'search', 'settings', 'bookmarks', 'lists', 'communities'];
-        if (!excludedRoutes.includes(username) && 
+        const excludedRoutes = new Set(['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'search', 'settings', 'bookmarks', 'lists', 'communities']);
+        if (!excludedRoutes.has(username) && 
             !username.startsWith('hashtag') &&
             !username.startsWith('search') &&
             username.length > 0 &&
@@ -73,6 +110,7 @@ function extractUsername(element) {
   // Try finding username links in the entire element (broader search)
   const allLinks = element.querySelectorAll('a[href^="/"]');
   const seenUsernames = new Set();
+  const excludedRoutes = new Set(['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'search', 'settings', 'bookmarks', 'lists', 'communities', 'hashtag']);
   
   for (const link of allLinks) {
     const href = link.getAttribute('href');
@@ -88,8 +126,7 @@ function extractUsername(element) {
     seenUsernames.add(potentialUsername);
     
     // Filter out routes and invalid usernames
-    const excludedRoutes = ['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'search', 'settings', 'bookmarks', 'lists', 'communities', 'hashtag'];
-    if (excludedRoutes.some(route => potentialUsername === route || potentialUsername.startsWith(route))) {
+    if (excludedRoutes.has(potentialUsername) || potentialUsername.startsWith('hashtag')) {
       continue;
     }
     
@@ -152,8 +189,16 @@ function extractUsername(element) {
 
 // Function to remove all flags (when extension is disabled)
 function removeAllFlags() {
-  const flags = document.querySelectorAll('[data-twitter-flag]');
-  flags.forEach(flag => flag.remove());
+  // Remove flag elements
+  const flags = document.querySelectorAll('[data-twitter-location-flag], [data-twitter-location-globe]');
+  flags.forEach(flag => {
+    // Clean up attached listeners before removing
+    if (flag._clickHandler) {
+      flag.removeEventListener('click', flag._clickHandler);
+      delete flag._clickHandler;
+    }
+    flag.remove();
+  });
   
   // Also remove any loading shimmers
   const shimmers = document.querySelectorAll('[data-twitter-flag-shimmer]');
@@ -165,7 +210,10 @@ function removeAllFlags() {
     delete container.dataset.flagAdded;
   });
   
-  console.log('Removed all flags');
+  // Clear processingUsernames Set to prevent memory leak
+  processingUsernames.clear();
+  
+  console.log('Removed all flags and cleared processing state');
 }
 
 // Function to process all username elements on the page
@@ -192,10 +240,22 @@ async function processUsernames() {
       if (!status || status === 'failed') {
         processedCount++;
         // Process in parallel but limit concurrency
-        addFlagToUsername(container, screenName).catch(err => {
-          console.error(`Error processing ${screenName}:`, err);
+        // Call addFlagToUsername via window if available; fallback to global
+        try {
+          const flagAdder = (typeof window !== 'undefined' && window.addFlagToUsername) ? window.addFlagToUsername : (typeof addFlagToUsername === 'function' ? addFlagToUsername : null);
+          if (flagAdder) {
+            flagAdder(container, screenName).catch(err => {
+              console.error(`Error processing ${screenName}:`, err);
+              container.dataset.flagAdded = 'failed';
+            });
+          } else {
+            console.error(`addFlagToUsername not available for ${screenName}`);
+            container.dataset.flagAdded = 'failed';
+          }
+        } catch (e) {
+          console.error(`Error processing ${screenName}:`, e);
           container.dataset.flagAdded = 'failed';
-        });
+        }
       } else {
         skippedCount++;
       }
@@ -210,8 +270,17 @@ async function processUsernames() {
   
   if (foundCount > 0) {
     console.log(`Found ${foundCount} usernames, processing ${processedCount} new ones, skipped ${skippedCount} already processed`);
+    metrics.totalProcessed += foundCount;
   } else {
     console.log('No usernames found in containers');
+  }
+  
+  // Clear processingUsernames Set after each cycle to prevent unbounded growth
+  processingUsernames.clear();
+  
+  // Log metrics every 100 processed items
+  if (metrics.totalProcessed % 100 === 0 && metrics.totalProcessed > 0) {
+    logMetrics();
   }
 }
 
@@ -220,7 +289,12 @@ function setupObserver() {
   if (observer) observer.disconnect();
 
   observer = new MutationObserver(() => {
-    setTimeout(processUsernames, 100);
+    // Clear existing timeout to prevent multiple pending calls
+    if (processUsernamesTimeout) {
+      clearTimeout(processUsernamesTimeout);
+    }
+    // Increase debounce from 100ms to 300ms to reduce excessive DOM queries
+    processUsernamesTimeout = setTimeout(processUsernames, 300);
   });
 
   observer.observe(document.body, {
@@ -235,10 +309,22 @@ async function init() {
     console.log('Initializing extension...');
     
     await loadEnabledState();
-    await loadCache();
+    
+    // Call cache loading via window if available; fallback to global
+    try {
+      const cacheLoader = (typeof window !== 'undefined' && window.loadCache) ? window.loadCache : (typeof loadCache === 'function' ? loadCache : null);
+      if (cacheLoader) await cacheLoader();
+    } catch (e) {
+      console.error('Error loading cache:', e);
+    }
     
     // Inject page script for API calls
-    injectPageScript();
+    try {
+      const pageScriptInjector = (typeof window !== 'undefined' && window.injectPageScript) ? window.injectPageScript : (typeof injectPageScript === 'function' ? injectPageScript : null);
+      if (pageScriptInjector) pageScriptInjector();
+    } catch (e) {
+      console.error('Error injecting page script:', e);
+    }
     
     // Initial processing
     processUsernames();
@@ -259,8 +345,60 @@ if (document.readyState === 'loading') {
   init();
 }
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-  if (observer) observer.disconnect();
-});
+// Comprehensive cleanup on page unload
+function cleanupAllResources() {
+  console.log('Cleaning up all resources...');
+  
+  // Log final metrics
+  logMetrics();
+  
+  // Disconnect observer
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
+  
+  // Clear debounce timeout
+  if (processUsernamesTimeout) {
+    clearTimeout(processUsernamesTimeout);
+    processUsernamesTimeout = null;
+  }
+  
+  // Cancel request queue
+  if (typeof window !== 'undefined' && window.requestQueue) {
+    window.requestQueue.length = 0;
+  }
+  
+  // Clear processing state
+  processingUsernames.clear();
+  
+  // Remove all event listeners attached to flags
+  const flags = document.querySelectorAll('[data-twitter-location-flag], [data-twitter-location-globe]');
+  flags.forEach(flag => {
+    if (flag._clickHandler) {
+      flag.removeEventListener('click', flag._clickHandler);
+      delete flag._clickHandler;
+    }
+  });
+  
+  // Hide tooltip if visible
+  try {
+    const hideTooltip = (typeof window !== 'undefined' && window.hideProfileTooltip) ? window.hideProfileTooltip : (typeof hideProfileTooltip === 'function' ? hideProfileTooltip : null);
+    if (hideTooltip) hideTooltip();
+  } catch (e) {
+    console.log('Error hiding tooltip during cleanup:', e);
+  }
+  
+  console.log('Cleanup complete');
+}
+
+window.addEventListener('beforeunload', cleanupAllResources);
+
+// Expose metrics for debugging
+try {
+  window.metrics = metrics;
+  window.logMetrics = logMetrics;
+} catch (e) {
+  // Silently ignore if window is unavailable
+}
 

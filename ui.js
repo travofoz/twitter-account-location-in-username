@@ -33,12 +33,39 @@ function insertElementAt(parentEl, childEl, index) {
   }
 }
 
+// Expose UI functions on window
+try {
+  window.addFlagToUsername = addFlagToUsername;
+  window.createLoadingShimmer = createLoadingShimmer;
+} catch (e) {
+  // Silently ignore if window is unavailable
+}
+
+// Expose addFlagToUsername on window
 async function addFlagToUsername(userEl, screenName) {
+  // Input validation
+  if (!userEl || !screenName) {
+    console.error('addFlagToUsername: Invalid arguments', { userEl, screenName });
+    return;
+  }
+  
+  // Ensure userEl is a valid DOM element
+  if (!(userEl instanceof Element)) {
+    console.error('addFlagToUsername: userEl is not a valid DOM element');
+    return;
+  }
+  
+  // Ensure screenName is a non-empty string
+  if (typeof screenName !== 'string' || screenName.length === 0) {
+    console.error('addFlagToUsername: screenName must be a non-empty string');
+    return;
+  }
+
   const existing = userEl.querySelector('[data-twitter-location-globe]');
   if (existing) return;
 
   // Check cache first
-  const cached = await (window.hasCachedProfileData ? window.hasCachedProfileData(screenName) : hasCachedData(screenName));
+  const cached = (window.fullProfileCache && window.fullProfileCache.has(screenName)) || (window.locationCache && window.locationCache.has(screenName) && window.locationCache.get(screenName) !== null);
   if (cached) {
     const data = (window.locationCache ? window.locationCache.get(screenName) : locationCache.get(screenName)) || (await getUserLocation(screenName));
     if (data?.fullProfile) {
@@ -54,11 +81,14 @@ async function addFlagToUsername(userEl, screenName) {
         flagEl.setAttribute('data-twitter-location-flag', screenName);
         flagEl.setAttribute('role', 'button');
         flagEl.setAttribute('tabindex', '0');
-        flagEl.addEventListener('click', (e) => {
+        
+        const clickHandler = (e) => {
           e.stopPropagation();
           const full = data.fullProfile;
-          if (full) showProfileTooltipForElement(flagEl, full);
-        });
+          if (full) (window.showProfileTooltipForElement || showProfileTooltipForElement)(flagEl, full);
+        };
+        flagEl._clickHandler = clickHandler;
+        flagEl.addEventListener('click', clickHandler);
         insertElementAt(userEl, flagEl, 0);
       }
     }
@@ -78,13 +108,14 @@ async function addFlagToUsername(userEl, screenName) {
 
     insertElementAt(userEl, globe, 0);
 
-    globe.addEventListener('click', async (e) => {
+    const clickHandler = async (e) => {
       e.stopPropagation();
       const shimmer = createLoadingShimmer();
       globe.replaceWith(shimmer);
 
       try {
-        const result = await getUserLocation(screenName);
+        const locGetter = window.getUserLocation || getUserLocation;
+        const result = await locGetter(screenName);
         const full = result?.fullResult ?? (window.fullProfileCache ? window.fullProfileCache.get(screenName) : (typeof fullProfileCache !== 'undefined' && fullProfileCache.get ? fullProfileCache.get(screenName) : null));
 
         if (full) {
@@ -118,10 +149,13 @@ async function addFlagToUsername(userEl, screenName) {
           flagEl.style.cursor = 'pointer';
           flagEl.setAttribute('role', 'button');
           flagEl.setAttribute('tabindex', '0');
-          flagEl.addEventListener('click', (e2) => {
+          
+          const flagClickHandler = (e2) => {
             e2.stopPropagation();
-            if (full) showProfileTooltipForElement(flagEl, full);
-          });
+            if (full) (window.showProfileTooltipForElement || showProfileTooltipForElement)(flagEl, full);
+          };
+          flagEl._clickHandler = flagClickHandler;
+          flagEl.addEventListener('click', flagClickHandler);
 
           shimmer.replaceWith(flagEl);
         } else {
@@ -141,6 +175,8 @@ async function addFlagToUsername(userEl, screenName) {
         shimmer.style.cursor = 'not-allowed';
         shimmer.style.opacity = '0.5';
       }
-    });
+    };
+    globe._clickHandler = clickHandler;
+    globe.addEventListener('click', clickHandler);
   }
 }

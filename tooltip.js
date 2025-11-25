@@ -1,6 +1,7 @@
 // Tooltip rendering and interactions
 let currentTooltip = null;
 let refreshInProgress = {};
+let tooltipAbortController = null;
 
 function formatTimestampToDate(ts) {
   if (!ts) return null;
@@ -15,12 +16,14 @@ async function refreshProfile(screenName) {
   refreshInProgress[screenName] = true;
 
   try {
-    const result = await getUserLocation(screenName, { force: true });
+    const locGetter = window.getUserLocation || getUserLocation;
+    const result = await locGetter(screenName, { force: true });
     const full = result?.fullResult ?? (window.fullProfileCache ? window.fullProfileCache.get(screenName) : (typeof fullProfileCache !== 'undefined' && fullProfileCache.get ? fullProfileCache.get(screenName) : null));
     if (full) {
       const anchorEl = currentTooltip?._anchorEl;
       if (anchorEl) {
-        showProfileTooltipForElement(anchorEl, full);
+        const showTooltip = window.showProfileTooltipForElement || showProfileTooltipForElement;
+        showTooltip(anchorEl, full);
       }
     }
   } catch (err) {
@@ -31,6 +34,12 @@ async function refreshProfile(screenName) {
 }
 
 function createProfileTooltip(profile) {
+  // Input validation
+  if (!profile || typeof profile !== 'object') {
+    console.error('createProfileTooltip: Invalid profile object');
+    return document.createElement('div');
+  }
+
   const container = document.createElement('div');
   container.setAttribute('data-twitter-profile-tooltip', 'true');
   container.style.position = 'absolute';
@@ -79,6 +88,12 @@ function createProfileTooltip(profile) {
   avatar.style.display = 'block';
   avatar.style.transition = 'opacity 0.2s';
   avatar.style.opacity = '1';
+  
+  // Handle broken image
+  avatar.onerror = () => {
+    avatar.style.display = 'none';
+  };
+  
   avatarLink.appendChild(avatar);
   avatarLink.addEventListener('mouseenter', () => { avatar.style.opacity = '0.8'; });
   avatarLink.addEventListener('mouseleave', () => { avatar.style.opacity = '1'; });
@@ -229,14 +244,32 @@ function createProfileTooltip(profile) {
 }
 
 function showProfileTooltipForElement(anchorEl, profile) {
+  // Input validation
+  if (!anchorEl || !(anchorEl instanceof Element)) {
+    console.error('showProfileTooltipForElement: anchorEl must be a valid DOM element');
+    return;
+  }
+  if (!profile || typeof profile !== 'object') {
+    console.error('showProfileTooltipForElement: profile must be a valid object');
+    return;
+  }
+
   hideProfileTooltip();
   const tooltip = createProfileTooltip(profile);
   document.body.appendChild(tooltip);
   currentTooltip = tooltip;
   currentTooltip._anchorEl = anchorEl;
 
+  // Create AbortController for automatic cleanup
+  tooltipAbortController = new AbortController();
+  const signal = tooltipAbortController.signal;
+
   // Measure & position after layout to avoid offsetWidth==0 issues
   requestAnimationFrame(() => {
+    // Check if tooltip is still in DOM before styling
+    if (!document.contains(tooltip)) {
+      return;
+    }
     const tooltipWidth = tooltip.offsetWidth || tooltip.clientWidth || 380;
     const rect = anchorEl.getBoundingClientRect();
     const top = rect.bottom + window.scrollY + 8;
@@ -254,13 +287,15 @@ function showProfileTooltipForElement(anchorEl, profile) {
     if (e.key === 'Escape') hideProfileTooltip();
   }
   setTimeout(() => {
-    document.addEventListener('click', onDocClick);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('click', onDocClick, { signal });
+    document.addEventListener('keydown', onKey, { signal });
   }, 0);
 
   tooltip._cleanup = () => {
-    document.removeEventListener('click', onDocClick);
-    document.removeEventListener('keydown', onKey);
+    // Abort all listeners associated with this tooltip
+    if (tooltipAbortController) {
+      tooltipAbortController.abort();
+    }
   };
 }
 
@@ -270,4 +305,14 @@ function hideProfileTooltip() {
     try { currentTooltip.remove(); } catch (e) {}
     currentTooltip = null;
   }
+}
+
+// Expose tooltip functions on window
+try {
+  window.createProfileTooltip = createProfileTooltip;
+  window.showProfileTooltipForElement = showProfileTooltipForElement;
+  window.hideProfileTooltip = hideProfileTooltip;
+  window.refreshProfile = refreshProfile;
+} catch (e) {
+  // Silently ignore if window is unavailable
 }

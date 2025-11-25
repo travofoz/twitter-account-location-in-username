@@ -7,6 +7,17 @@ const MAX_CONCURRENT_REQUESTS = 2;
 let activeRequests = 0;
 let rateLimitResetTime = 0;
 
+// Structured error logging
+function logError(context, error, severity = 'error') {
+  const timestamp = new Date().toISOString();
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : '';
+  console.error(`[${severity.toUpperCase()}] [${timestamp}] ${context}:`, {
+    message: errorMsg,
+    stack: stack
+  });
+}
+
 async function processRequestQueue() {
   if (isProcessingQueue || requestQueue.length === 0) return;
   
@@ -36,8 +47,22 @@ async function processRequestQueue() {
     lastRequestTime = Date.now();
     
     makeLocationRequest(screenName)
-      .then(location => resolve(location))
-      .catch(error => reject(error))
+      .then(location => {
+        resolve(location);
+        // Resolve any duplicate requests for same screenName
+        if (this._extraResolves) {
+          this._extraResolves.forEach(res => res(location));
+          delete this._extraResolves;
+        }
+      })
+      .catch(error => {
+        reject(error);
+        // Reject any duplicate requests for same screenName
+        if (this._extraRejects) {
+          this._extraRejects.forEach(rej => rej(error));
+          delete this._extraRejects;
+        }
+      })
       .finally(() => {
         activeRequests--;
         setTimeout(processRequestQueue, 200);
@@ -78,7 +103,7 @@ function makeLocationRequest(screenName) {
                 if (fullResult && typeof saveFullProfile === 'function') saveFullProfile(screenName, fullResult);
               }
             } catch (e) {
-              console.error('Error saving cache from api.js', e);
+              logError('Cache save after API response', e, 'warn');
             }
           } else {
             console.log(`Not caching for ${screenName} due to rate limit`);
@@ -99,20 +124,27 @@ function makeLocationRequest(screenName) {
   });
 }
 
+let rateLimitInfoHandlerRegistered = false;
+
 function injectPageScript() {
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('pageScript.js');
   script.onload = () => script.remove();
   (document.head || document.documentElement).appendChild(script);
   
-  window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
-    if (event.data?.type === '__rateLimitInfo') {
-      rateLimitResetTime = event.data.resetTime;
-      const waitTime = event.data.waitTime;
-      console.log(`Rate limit detected. Will resume in ${Math.ceil(waitTime / 1000 / 60)} minutes`);
-    }
-  });
+  // Register rate limit listener only once to prevent accumulation
+  if (!rateLimitInfoHandlerRegistered) {
+    const handleRateLimitInfo = (event) => {
+      if (event.source !== window) return;
+      if (event.data?.type === '__rateLimitInfo') {
+        rateLimitResetTime = event.data.resetTime;
+        const waitTime = event.data.waitTime;
+        console.log(`Rate limit detected. Will resume in ${Math.ceil(waitTime / 1000 / 60)} minutes`);
+      }
+    };
+    window.addEventListener('message', handleRateLimitInfo);
+    rateLimitInfoHandlerRegistered = true;
+  }
 }
 
 function getUserLocation(screenName, options = {}) {
@@ -136,12 +168,38 @@ function getUserLocation(screenName, options = {}) {
       if (typeof locationCache.delete === 'function') locationCache.delete(screenName);
     }
   } catch (e) {
-    // ignore and proceed to queue a network request
+    logError('Cache lookup', e, 'warn');
+  }
+  
+  // Check if screenName is already in queue to prevent duplicate requests
+  const existingRequest = requestQueue.find(req => req.screenName === screenName);
+  if (existingRequest) {
+    console.log(`Request already queued for ${screenName}, returning existing promise`);
+    return new Promise((resolve, reject) => {
+      // Attach new promise handlers to existing request
+      existingRequest._extraResolves = existingRequest._extraResolves || [];
+      existingRequest._extraRejects = existingRequest._extraRejects || [];
+      existingRequest._extraResolves.push(resolve);
+      existingRequest._extraRejects.push(reject);
+    });
   }
   
   console.log(`Queueing API request for ${screenName}` + (force ? ' (forced)' : ''));
+  // Track metrics if available
+  if (typeof window !== 'undefined' && window.metrics) {
+    window.metrics.apiRequests++;
+  }
   return new Promise((resolve, reject) => {
     requestQueue.push({ screenName, resolve, reject });
     processRequestQueue();
   });
+}
+
+// Expose public API functions on window
+try {
+  window.injectPageScript = injectPageScript;
+  window.getUserLocation = getUserLocation;
+  window.processRequestQueue = processRequestQueue;
+} catch (e) {
+  // Silently ignore if window is unavailable
 }

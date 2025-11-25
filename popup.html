@@ -74,6 +74,41 @@
       padding-top: 12px;
       border-top: 1px solid #eff3f4;
     }
+    .cache-section {
+      margin-top: 12px;
+      padding: 12px;
+      background: #f7f9f9;
+      border-radius: 8px;
+    }
+    .cache-info {
+      font-size: 12px;
+      color: #536471;
+      margin-bottom: 8px;
+    }
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      background: #1d9bf0;
+      color: white;
+      border: none;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #1a91da;
+    }
+    button:active {
+      background: #1881ca;
+    }
+    button.danger {
+      background: #e74c3c;
+    }
+    button.danger:hover {
+      background: #c0392b;
+    }
   </style>
 </head>
 <body>
@@ -90,6 +125,13 @@
   
   <div class="info">
     Shows country flags next to Twitter usernames based on account location.
+  </div>
+
+  <div class="cache-section">
+    <div class="cache-info">
+      Cached profiles: <strong id="cacheSize">--</strong>
+    </div>
+    <button id="clearCacheBtn" class="danger">Clear Cache</button>
   </div>
 
   <script src="popup.js"></script>

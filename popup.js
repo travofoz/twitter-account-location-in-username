@@ -1,16 +1,31 @@
 // Popup script for extension toggle
 const TOGGLE_KEY = 'extension_enabled';
+const CACHE_KEY = 'twitter_location_cache';
 const DEFAULT_ENABLED = true;
 
-// Get toggle element
+// Get elements
 const toggleSwitch = document.getElementById('toggleSwitch');
 const status = document.getElementById('status');
+const cacheSize = document.getElementById('cacheSize');
+const clearCacheBtn = document.getElementById('clearCacheBtn');
 
 // Load current state
 chrome.storage.local.get([TOGGLE_KEY], (result) => {
   const isEnabled = result[TOGGLE_KEY] !== undefined ? result[TOGGLE_KEY] : DEFAULT_ENABLED;
   updateToggle(isEnabled);
 });
+
+// Update cache size display
+function updateCacheSize() {
+  chrome.storage.local.get([CACHE_KEY], (result) => {
+    const cache = result[CACHE_KEY] || {};
+    const count = Object.keys(cache).length;
+    cacheSize.textContent = count;
+  });
+}
+
+// Load cache size on popup open
+updateCacheSize();
 
 // Toggle click handler
 toggleSwitch.addEventListener('click', () => {
@@ -34,6 +49,28 @@ toggleSwitch.addEventListener('click', () => {
       });
     });
   });
+});
+
+// Clear cache button handler
+clearCacheBtn.addEventListener('click', () => {
+  if (confirm('Clear all cached profiles? This cannot be undone.')) {
+    chrome.storage.local.remove([CACHE_KEY], () => {
+      console.log('Cache cleared from popup');
+      updateCacheSize();
+      alert('Cache cleared successfully!');
+      
+      // Notify content script to clear runtime caches
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'clearCache'
+          }).catch(() => {
+            // Tab might not have content script
+          });
+        });
+      });
+    });
+  }
 });
 
 function updateToggle(isEnabled) {
